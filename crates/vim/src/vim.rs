@@ -6,6 +6,7 @@ mod test;
 mod change_list;
 mod command;
 mod digraph;
+mod easy_motion;
 mod helix;
 mod indent;
 mod insert;
@@ -21,6 +22,7 @@ mod visual;
 
 use anyhow::Result;
 use collections::HashMap;
+use easy_motion::{EasyMotion, EasyMotionAddon};
 use editor::{
     Anchor, Bias, Editor, EditorEvent, EditorMode, EditorSettings, HideMouseCursorOrigin, ToPoint,
     movement::{self, FindRange},
@@ -700,7 +702,18 @@ impl Vim {
             cx.defer_in(window, |vim, window, cx| {
                 vim.focused(false, window, cx);
             })
-        })
+        });
+
+        if VimSettings::get_global(cx).easy_motion.enabled {
+            let easy_motion = EasyMotion::new(window, cx, vim.downgrade());
+            editor.register_addon(EasyMotionAddon {
+                _view: easy_motion.clone(),
+            });
+
+            easy_motion.update(cx, |_, cx| {
+                easy_motion::register(editor, cx);
+            });
+        }
     }
 
     fn deactivate(editor: &mut Editor, cx: &mut Context<Editor>) {
@@ -1019,9 +1032,11 @@ impl Vim {
                 }
             }
             Mode::Replace => CursorShape::Underline,
-            Mode::HelixNormal | Mode::Visual | Mode::VisualLine | Mode::VisualBlock => {
-                CursorShape::Block
-            }
+            Mode::HelixNormal
+            | Mode::Visual
+            | Mode::VisualLine
+            | Mode::VisualBlock
+            | Mode::EasyMotion => CursorShape::Block,
             Mode::Insert => {
                 let editor_settings = EditorSettings::get_global(cx);
                 editor_settings.cursor_shape.unwrap_or_default()
@@ -1043,7 +1058,8 @@ impl Vim {
             | Mode::Replace
             | Mode::Visual
             | Mode::VisualLine
-            | Mode::VisualBlock => false,
+            | Mode::VisualBlock
+            | Mode::EasyMotion => false,
         }
     }
 
@@ -1058,7 +1074,8 @@ impl Vim {
             | Mode::VisualLine
             | Mode::VisualBlock
             | Mode::Replace
-            | Mode::HelixNormal => false,
+            | Mode::HelixNormal
+            | Mode::EasyMotion => false,
             Mode::Normal => true,
         }
     }
@@ -1070,6 +1087,7 @@ impl Vim {
             Mode::Insert => "insert",
             Mode::Replace => "replace",
             Mode::HelixNormal => "helix_normal",
+            Mode::EasyMotion => "easy_motion",
         }
         .to_string();
 
@@ -1433,7 +1451,7 @@ impl Vim {
                     })
                 });
             }
-            Mode::Insert | Mode::Replace | Mode::HelixNormal => {}
+            Mode::Insert | Mode::Replace | Mode::HelixNormal | Mode::EasyMotion => {}
         }
     }
 
@@ -1666,6 +1684,14 @@ pub enum UseSystemClipboard {
     OnYank,
 }
 
+/// Controls when to use easy motion.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct EasyMotionSettings {
+    enabled: bool,
+    keys: String,
+}
+
 #[derive(Deserialize)]
 struct VimSettings {
     pub default_mode: Mode,
@@ -1675,6 +1701,7 @@ struct VimSettings {
     pub use_smartcase_find: bool,
     pub custom_digraphs: HashMap<String, Arc<str>>,
     pub highlight_on_yank_duration: u64,
+    pub easy_motion: EasyMotionSettings,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize, JsonSchema)]
@@ -1686,6 +1713,7 @@ struct VimSettingsContent {
     pub use_smartcase_find: Option<bool>,
     pub custom_digraphs: Option<HashMap<String, Arc<str>>>,
     pub highlight_on_yank_duration: Option<u64>,
+    pub easy_motion: Option<EasyMotionSettings>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize, JsonSchema)]
@@ -1744,6 +1772,7 @@ impl Settings for VimSettings {
             highlight_on_yank_duration: settings
                 .highlight_on_yank_duration
                 .ok_or_else(Self::missing_default)?,
+            easy_motion: settings.easy_motion.ok_or_else(Self::missing_default)?,
         })
     }
 }

@@ -159,7 +159,7 @@ impl Vim {
                         }
                     }
 
-                    Mode::HelixNormal => {}
+                    Mode::HelixNormal | Mode::EasyMotion => {}
                     Mode::Insert | Mode::Normal | Mode::Replace => {
                         let start = selection.start;
                         let mut end = start;
