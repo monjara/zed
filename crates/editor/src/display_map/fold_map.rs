@@ -571,8 +571,8 @@ impl FoldMap {
 
 #[derive(Clone)]
 pub struct FoldSnapshot {
-    transforms: SumTree<Transform>,
-    folds: SumTree<Fold>,
+    pub transforms: SumTree<Transform>,
+    pub folds: SumTree<Fold>,
     pub inlay_snapshot: InlaySnapshot,
     pub version: usize,
 }
@@ -759,6 +759,16 @@ impl FoldSnapshot {
         }
     }
 
+    pub fn is_point_folded(&self, point: Point) -> bool {
+        let inlay_point = self.inlay_snapshot.to_inlay_point(point);
+        let mut cursor = self.transforms.cursor::<InlayPoint>(&());
+        cursor.seek(&inlay_point, Bias::Right, &());
+        cursor
+            .item()
+            .map(|transform| transform.placeholder.is_some())
+            .unwrap_or_default()
+    }
+
     pub(crate) fn chunks<'a>(
         &'a self,
         range: Range<FoldOffset>,
@@ -808,6 +818,15 @@ impl FoldSnapshot {
             Highlights::default(),
         )
         .flat_map(|chunk| chunk.text.chars())
+    }
+
+    pub fn chars_for_range(
+        &self,
+        start: FoldOffset,
+        end: FoldOffset,
+    ) -> impl Iterator<Item = char> + '_ {
+        self.chunks(start..end, false, Highlights::default())
+            .flat_map(|chunk| chunk.text.chars())
     }
 
     #[cfg(test)]
@@ -962,13 +981,13 @@ fn consolidate_fold_edits(mut edits: Vec<FoldEdit>) -> Vec<FoldEdit> {
 }
 
 #[derive(Clone, Debug, Default)]
-struct Transform {
+pub struct Transform {
     summary: TransformSummary,
     placeholder: Option<TransformPlaceholder>,
 }
 
 #[derive(Clone, Debug)]
-struct TransformPlaceholder {
+pub struct TransformPlaceholder {
     text: &'static str,
     renderer: ChunkRenderer,
 }
@@ -980,7 +999,7 @@ impl Transform {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct TransformSummary {
+pub struct TransformSummary {
     output: TextSummary,
     input: TextSummary,
 }

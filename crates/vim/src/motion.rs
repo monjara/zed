@@ -590,7 +590,7 @@ impl Vim {
                         });
                     }
                 }
-                Mode::Normal | Mode::Replace | Mode::Insert => {
+                Mode::Normal | Mode::Replace | Mode::Insert | Mode::EasyMotion => {
                     if self.active_operator().is_none() {
                         return;
                     }
@@ -616,7 +616,7 @@ impl Vim {
         let active_operator = self.active_operator();
         let mut waiting_operator: Option<Operator> = None;
         match self.mode {
-            Mode::Normal | Mode::Replace | Mode::Insert => {
+            Mode::Normal | Mode::Replace | Mode::Insert | Mode::EasyMotion => {
                 if active_operator == Some(Operator::AddSurrounds { target: None }) {
                     waiting_operator = Some(Operator::AddSurrounds {
                         target: Some(SurroundsType::Motion(motion)),
@@ -2444,7 +2444,7 @@ pub(crate) fn next_line_end(
     end_of_line(map, false, point, 1)
 }
 
-fn window_top(
+pub(crate) fn window_top(
     map: &DisplaySnapshot,
     point: DisplayPoint,
     text_layout_details: &TextLayoutDetails,
@@ -2505,7 +2505,7 @@ fn window_middle(
     }
 }
 
-fn window_bottom(
+pub(crate) fn window_bottom(
     map: &DisplaySnapshot,
     point: DisplayPoint,
     text_layout_details: &TextLayoutDetails,

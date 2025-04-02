@@ -367,7 +367,7 @@ impl Vim {
             Mode::Visual | Mode::VisualLine | Mode::VisualBlock => {
                 self.visual_object(object, window, cx)
             }
-            Mode::Insert | Mode::Replace | Mode::HelixNormal => {
+            Mode::Insert | Mode::Replace | Mode::HelixNormal | Mode::EasyMotion => {
                 // Shouldn't execute a text object in insert mode. Ignoring
             }
         }

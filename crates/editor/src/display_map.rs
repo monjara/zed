@@ -20,7 +20,7 @@
 mod block_map;
 mod crease_map;
 mod custom_highlights;
-mod fold_map;
+pub(crate) mod fold_map;
 mod inlay_map;
 pub(crate) mod invisibles;
 mod tab_map;
@@ -1103,6 +1103,10 @@ impl DisplaySnapshot {
     pub fn is_line_folded(&self, buffer_row: MultiBufferRow) -> bool {
         self.block_snapshot.is_line_replaced(buffer_row)
             || self.fold_snapshot.is_line_folded(buffer_row)
+    }
+
+    pub fn is_point_folded(&self, point: Point) -> bool {
+        self.fold_snapshot.is_point_folded(point)
     }
 
     pub fn is_block_line(&self, display_row: DisplayRow) -> bool {

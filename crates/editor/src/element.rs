@@ -38,7 +38,7 @@ use gpui::{
     InteractiveElement, IntoElement, Keystroke, Length, ModifiersChangedEvent, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement, Pixels, ScrollDelta,
     ScrollWheelEvent, ShapedLine, SharedString, Size, StatefulInteractiveElement, Style, Styled,
-    TextRun, TextStyleRefinement, WeakEntity, Window, anchored, deferred, div, fill,
+    TextRun, TextStyle, TextStyleRefinement, WeakEntity, Window, anchored, deferred, div, fill,
     linear_color_stop, linear_gradient, outline, point, px, quad, relative, size, solid_background,
     transparent_black,
 };
@@ -1445,6 +1445,48 @@ impl EditorElement {
             show_scrollbars,
             window,
         ))
+    }
+
+    fn prepaint_overlays(
+        &self,
+        content_origin: gpui::Point<Pixels>,
+        line_height: Pixels,
+        visible_display_row_range: Range<DisplayRow>,
+        scroll_pixel_position: gpui::Point<Pixels>,
+        line_layouts: &[LineWithInvisibles],
+        text_style: &TextStyle,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Vec<AnyElement> {
+        let overlay_map = self
+            .editor
+            .update(cx, |editor, _| mem::take(&mut editor.overlay_map));
+        let overlays = overlay_map
+            .iter()
+            .flat_map(|(_, list)| list.iter())
+            .filter_map(|overlay| overlay.render(text_style, visible_display_row_range.clone()));
+        let available_space = size(AvailableSpace::MinContent, AvailableSpace::MinContent);
+
+        let overlays = overlays
+            .map(|(anchor, mut overlay)| {
+                let _overlay_size = overlay.layout_as_root(available_space, window, cx);
+
+                let hovered_row_layout =
+                    &line_layouts[anchor.row().minus(visible_display_row_range.start) as usize];
+
+                let x = hovered_row_layout.x_for_index(anchor.column() as usize)
+                    - scroll_pixel_position.x;
+                let y = anchor.row().as_f32() * line_height - scroll_pixel_position.y;
+                let origin = content_origin + point(x, y);
+
+                overlay.prepaint_at(origin, window, cx);
+                overlay
+            })
+            .collect_vec();
+
+        self.editor
+            .update(cx, move |editor, _| editor.overlay_map = overlay_map);
+        overlays
     }
 
     fn prepaint_crease_toggles(
@@ -7343,6 +7385,17 @@ impl Element for EditorElement {
                         );
                     }
 
+                    let overlays = self.prepaint_overlays(
+                        content_origin,
+                        line_height,
+                        start_row..end_row,
+                        scroll_pixel_position,
+                        &line_layouts,
+                        &style.text,
+                        window,
+                        cx,
+                    );
+
                     let mouse_context_menu = self.layout_mouse_context_menu(
                         &snapshot,
                         start_row..end_row,
@@ -7475,6 +7528,7 @@ impl Element for EditorElement {
                         space_invisible,
                         sticky_buffer_header,
                         expand_toggles,
+                        overlays,
                     }
                 })
             })
@@ -7523,6 +7577,10 @@ impl Element for EditorElement {
                     }
 
                     self.paint_text(layout, window, cx);
+
+                    for overlay in layout.overlays.iter_mut() {
+                        overlay.paint(window, cx);
+                    }
 
                     if layout.gutter_hitbox.size.width > Pixels::ZERO {
                         self.paint_gutter_highlights(layout, window, cx);
@@ -7651,6 +7709,7 @@ pub struct EditorLayout {
     tab_invisible: ShapedLine,
     space_invisible: ShapedLine,
     sticky_buffer_header: Option<AnyElement>,
+    overlays: Vec<AnyElement>,
 }
 
 impl EditorLayout {

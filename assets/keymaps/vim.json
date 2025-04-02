@@ -184,7 +184,9 @@
       "ctrl-w g shift-d": "editor::GoToTypeDefinitionSplit",
       "ctrl-w space": "editor::OpenExcerptsSplit",
       "ctrl-w g space": "editor::OpenExcerptsSplit",
-      "ctrl-6": "pane::AlternateFile"
+      "ctrl-6": "pane::AlternateFile",
+
+      "ctrl-;": ["easy_motion::Word", "both"]
     }
   },
   {
@@ -594,6 +596,12 @@
       // zed extensions:
       "backspace": ["vim::Literal", ["backspace", "\u0008"]],
       "delete": ["vim::Literal", ["delete", "\u007F"]]
+    }
+  },
+  {
+    "context": "vim_mode == easy_motion",
+    "bindings": {
+      "escape": "easy_motion::Cancel"
     }
   },
   {
