@@ -16830,7 +16830,6 @@ impl Editor {
         list.reserve_exact(reserve);
         list.extend(overlays);
         cx.notify();
-        println!("overlay_map: {0:?}", self.overlay_map);
     }
 
     pub fn clear_overlays<T: 'static>(&mut self, cx: &mut Context<Self>) {
