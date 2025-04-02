@@ -296,6 +296,10 @@ impl LanguageModel for GoogleLanguageModel {
         LanguageModelProviderName(PROVIDER_NAME.into())
     }
 
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
     fn tool_input_format(&self) -> LanguageModelToolSchemaFormat {
         LanguageModelToolSchemaFormat::JsonSchemaSubset
     }
@@ -468,19 +472,17 @@ pub fn into_google(
             top_k: None,
         }),
         safety_settings: None,
-        tools: Some(
-            request
+        tools: Some(vec![google_ai::Tool {
+            function_declarations: request
                 .tools
                 .into_iter()
-                .map(|tool| google_ai::Tool {
-                    function_declarations: vec![FunctionDeclaration {
-                        name: tool.name,
-                        description: tool.description,
-                        parameters: tool.input_schema,
-                    }],
+                .map(|tool| FunctionDeclaration {
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.input_schema,
                 })
                 .collect(),
-        ),
+        }]),
         tool_config: None,
     }
 }

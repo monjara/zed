@@ -149,7 +149,7 @@ pub use multi_buffer::{
 };
 use multi_buffer::{
     ExcerptInfo, ExpandExcerptDirection, MultiBufferDiffHunk, MultiBufferPoint, MultiBufferRow,
-    MultiOrSingleBufferOffsetRange, ToOffsetUtf16,
+    MultiOrSingleBufferOffsetRange, PathKey, ToOffsetUtf16,
 };
 use parking_lot::Mutex;
 use project::{
@@ -5039,17 +5039,19 @@ impl Editor {
         let excerpt_buffer = cx.new(|cx| {
             let mut multibuffer = MultiBuffer::new(Capability::ReadWrite).with_title(title);
             for (buffer_handle, transaction) in &entries {
-                let buffer = buffer_handle.read(cx);
-                ranges_to_highlight.extend(
-                    multibuffer.push_excerpts_with_context_lines(
-                        buffer_handle.clone(),
-                        buffer
-                            .edited_ranges_for_transaction::<usize>(transaction)
-                            .collect(),
-                        DEFAULT_MULTIBUFFER_CONTEXT,
-                        cx,
-                    ),
+                let edited_ranges = buffer_handle
+                    .read(cx)
+                    .edited_ranges_for_transaction::<Point>(transaction)
+                    .collect::<Vec<_>>();
+                let (ranges, _) = multibuffer.set_excerpts_for_path(
+                    PathKey::for_buffer(buffer_handle, cx),
+                    buffer_handle.clone(),
+                    edited_ranges,
+                    DEFAULT_MULTIBUFFER_CONTEXT,
+                    cx,
                 );
+
+                ranges_to_highlight.extend(ranges);
             }
             multibuffer.push_transaction(entries.iter().map(|(b, t)| (b, t)), cx);
             multibuffer
@@ -6253,7 +6255,7 @@ impl Editor {
     /// It's also used to set the color of line numbers with breakpoints to the breakpoint color.
     /// TODO debugger: Use this function to color toggle symbols that house nested breakpoints
     fn active_breakpoints(
-        &mut self,
+        &self,
         range: Range<DisplayRow>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -6324,24 +6326,26 @@ impl Editor {
 
         let breakpoint = self
             .breakpoint_at_row(row, window, cx)
-            .map(|(_, bp)| Arc::from(bp));
+            .map(|(anchor, bp)| (anchor, Arc::from(bp)));
 
-        let log_breakpoint_msg = if breakpoint.as_ref().is_some_and(|bp| bp.message.is_some()) {
+        let log_breakpoint_msg = if breakpoint.as_ref().is_some_and(|bp| bp.1.message.is_some()) {
             "Edit Log Breakpoint"
         } else {
             "Set Log Breakpoint"
         };
 
-        let condition_breakpoint_msg =
-            if breakpoint.as_ref().is_some_and(|bp| bp.condition.is_some()) {
-                "Edit Condition Breakpoint"
-            } else {
-                "Set Condition Breakpoint"
-            };
+        let condition_breakpoint_msg = if breakpoint
+            .as_ref()
+            .is_some_and(|bp| bp.1.condition.is_some())
+        {
+            "Edit Condition Breakpoint"
+        } else {
+            "Set Condition Breakpoint"
+        };
 
         let hit_condition_breakpoint_msg = if breakpoint
             .as_ref()
-            .is_some_and(|bp| bp.hit_condition.is_some())
+            .is_some_and(|bp| bp.1.hit_condition.is_some())
         {
             "Edit Hit Condition Breakpoint"
         } else {
@@ -6354,12 +6358,13 @@ impl Editor {
             "Set Breakpoint"
         };
 
-        let toggle_state_msg = breakpoint.as_ref().map_or(None, |bp| match bp.state {
+        let toggle_state_msg = breakpoint.as_ref().map_or(None, |bp| match bp.1.state {
             BreakpointState::Enabled => Some("Disable"),
             BreakpointState::Disabled => Some("Enable"),
         });
 
-        let breakpoint = breakpoint.unwrap_or_else(|| Arc::new(Breakpoint::new_standard()));
+        let (anchor, breakpoint) =
+            breakpoint.unwrap_or_else(|| (anchor, Arc::new(Breakpoint::new_standard())));
 
         ui::ContextMenu::build(window, cx, |menu, _, _cx| {
             menu.on_blur_subscription(Subscription::new(|| {}))
@@ -9164,6 +9169,42 @@ impl Editor {
                     }
                     t
                 })
+        })
+    }
+
+    pub fn convert_to_rot13(
+        &mut self,
+        _: &ConvertToRot13,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.manipulate_text(window, cx, |text| {
+            text.chars()
+                .map(|c| match c {
+                    'A'..='M' | 'a'..='m' => ((c as u8) + 13) as char,
+                    'N'..='Z' | 'n'..='z' => ((c as u8) - 13) as char,
+                    _ => c,
+                })
+                .collect()
+        })
+    }
+
+    pub fn convert_to_rot47(
+        &mut self,
+        _: &ConvertToRot47,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.manipulate_text(window, cx, |text| {
+            text.chars()
+                .map(|c| {
+                    let code_point = c as u32;
+                    if code_point >= 33 && code_point <= 126 {
+                        return char::from_u32(33 + ((code_point + 14) % 94)).unwrap();
+                    }
+                    c
+                })
+                .collect()
         })
     }
 
@@ -13532,7 +13573,7 @@ impl Editor {
         // If there are multiple definitions, open them in a multibuffer
         locations.sort_by_key(|location| location.buffer.read(cx).remote_id());
         let mut locations = locations.into_iter().peekable();
-        let mut ranges = Vec::new();
+        let mut ranges: Vec<Range<Anchor>> = Vec::new();
         let capability = workspace.project().read(cx).capability();
 
         let excerpt_buffer = cx.new(|cx| {
@@ -13540,12 +13581,12 @@ impl Editor {
             while let Some(location) = locations.next() {
                 let buffer = location.buffer.read(cx);
                 let mut ranges_for_buffer = Vec::new();
-                let range = location.range.to_offset(buffer);
+                let range = location.range.to_point(buffer);
                 ranges_for_buffer.push(range.clone());
 
                 while let Some(next_location) = locations.peek() {
                     if next_location.buffer == location.buffer {
-                        ranges_for_buffer.push(next_location.range.to_offset(buffer));
+                        ranges_for_buffer.push(next_location.range.to_point(buffer));
                         locations.next();
                     } else {
                         break;
@@ -13553,12 +13594,14 @@ impl Editor {
                 }
 
                 ranges_for_buffer.sort_by_key(|range| (range.start, Reverse(range.end)));
-                ranges.extend(multibuffer.push_excerpts_with_context_lines(
+                let (new_ranges, _) = multibuffer.set_excerpts_for_path(
+                    PathKey::for_buffer(&location.buffer, cx),
                     location.buffer.clone(),
                     ranges_for_buffer,
                     DEFAULT_MULTIBUFFER_CONTEXT,
                     cx,
-                ))
+                );
+                ranges.extend(new_ranges)
             }
 
             multibuffer.with_title(title)
@@ -17239,6 +17282,9 @@ impl Editor {
             }
         }
 
+        new_selections_by_buffer
+            .retain(|buffer, _| Self::can_open_excerpts_in_file(buffer.read(cx).file()));
+
         if new_selections_by_buffer.is_empty() {
             return;
         }
@@ -17305,6 +17351,12 @@ impl Editor {
                 }
             })
         });
+    }
+
+    // For now, don't allow opening excerpts in buffers that aren't backed by
+    // regular project files.
+    fn can_open_excerpts_in_file(file: Option<&Arc<dyn language::File>>) -> bool {
+        file.map_or(true, |file| project::File::from_dyn(Some(file)).is_some())
     }
 
     fn marked_text_ranges(&self, cx: &App) -> Option<Vec<Range<OffsetUtf16>>> {
@@ -20379,7 +20431,7 @@ fn render_diff_hunk_controls(
                 })
         })
         .child(
-            Button::new("restore", "Restore")
+            Button::new(("restore", row as u64), "Restore")
                 .tooltip({
                     let focus_handle = editor.focus_handle(cx);
                     move |window, cx| {
