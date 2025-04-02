@@ -13,7 +13,7 @@ use crate::motion::{window_bottom, window_top};
 
 use super::Direction;
 
-pub(crate) fn enumerate_word_beggings(
+pub(crate) fn enumerate_word_beginnings(
     direction: Direction,
     editor: &mut Editor,
     window: &mut Window,
@@ -31,10 +31,10 @@ pub(crate) fn enumerate_word_beggings(
         &selections,
         &text_layout_details,
     );
-    enumerate_word_beggings_in_range(&display_snapshot, start, end)
+    enumerate_word_beginings_in_range(&display_snapshot, start, end)
 }
 
-fn enumerate_word_beggings_in_range(
+fn enumerate_word_beginings_in_range(
     display_snapshot: &DisplaySnapshot,
     from: DisplayPoint,
     to: DisplayPoint,

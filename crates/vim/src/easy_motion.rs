@@ -8,7 +8,7 @@ use gpui::{
     Window, actions, impl_actions,
 };
 use schemars::JsonSchema;
-use search::{enumerate_word_beggings, sort_matches_display};
+use search::{enumerate_word_beginnings, sort_matches_display};
 use serde::Deserialize;
 use settings::Settings;
 use text::{Bias, SelectionGoal};
@@ -164,7 +164,7 @@ impl EasyMotion {
         });
 
         let new_state = editor.update(cx, |editor, cx| {
-            let points = enumerate_word_beggings(direction, editor, window, cx);
+            let points = enumerate_word_beginnings(direction, editor, window, cx);
             Self::handle_new_matches(points, direction, editor, window, cx)
         });
 
