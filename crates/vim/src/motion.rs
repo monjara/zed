@@ -2441,7 +2441,7 @@ pub(crate) fn next_line_end(
     end_of_line(map, false, point, 1)
 }
 
-fn window_top(
+pub(crate) fn window_top(
     map: &DisplaySnapshot,
     point: DisplayPoint,
     text_layout_details: &TextLayoutDetails,
@@ -2502,7 +2502,7 @@ fn window_middle(
     }
 }
 
-fn window_bottom(
+pub(crate) fn window_bottom(
     map: &DisplaySnapshot,
     point: DisplayPoint,
     text_layout_details: &TextLayoutDetails,

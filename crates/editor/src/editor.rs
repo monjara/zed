@@ -32,6 +32,7 @@ mod linked_editing_ranges;
 mod lsp_ext;
 mod mouse_context_menu;
 pub mod movement;
+pub mod overlay;
 mod persistence;
 mod proposed_changes_editor;
 mod rust_analyzer_ext;
@@ -117,6 +118,7 @@ use language::{
 use language::{BufferRow, CharClassifier, Runnable, RunnableRange, point_to_lsp};
 use linked_editing_ranges::refresh_linked_ranges;
 use mouse_context_menu::MouseContextMenu;
+use overlay::Overlay;
 use persistence::DB;
 use project::{
     ProjectPath,
@@ -691,7 +693,7 @@ pub struct Editor {
     semantics_provider: Option<Rc<dyn SemanticsProvider>>,
     completion_provider: Option<Box<dyn CompletionProvider>>,
     collaboration_hub: Option<Box<dyn CollaborationHub>>,
-    blink_manager: Entity<BlinkManager>,
+    pub blink_manager: Entity<BlinkManager>,
     show_cursor_names: bool,
     hovered_cursors: HashMap<HoveredCursor, Task<()>>,
     pub show_local_selections: bool,
@@ -742,6 +744,7 @@ pub struct Editor {
     leader_peer_id: Option<PeerId>,
     remote_id: Option<ViewId>,
     hover_state: HoverState,
+    overlay_map: HashMap<TypeId, Vec<Overlay>>,
     pending_mouse_down: Option<Rc<RefCell<Option<MouseDownEvent>>>>,
     gutter_hovered: bool,
     hovered_link_state: Option<HoveredLinkState>,
@@ -1515,6 +1518,7 @@ impl Editor {
             leader_peer_id: None,
             remote_id: None,
             hover_state: Default::default(),
+            overlay_map: Default::default(),
             pending_mouse_down: None,
             hovered_link_state: Default::default(),
             edit_prediction_provider: None,
@@ -14892,6 +14896,7 @@ impl Editor {
 
         self.scrollbar_marker_state.dirty = true;
         self.folds_did_change(cx);
+        cx.emit(EditorEvent::Fold);
     }
 
     /// Removes any folds whose ranges intersect any of the given ranges.
@@ -14993,6 +14998,7 @@ impl Editor {
         }
 
         cx.notify();
+        cx.emit(EditorEvent::UnFold);
         self.scrollbar_marker_state.dirty = true;
         self.active_indent_guides_state.dirty = true;
     }
@@ -16763,6 +16769,30 @@ impl Editor {
                     ..range.end.to_display_point(display_snapshot)
             })
             .collect()
+    }
+
+    pub fn add_overlay<T: 'static>(&mut self, overlay: Overlay, cx: &mut Context<Self>) {
+        let list = self.overlay_map.entry(TypeId::of::<T>()).or_default();
+        list.push(overlay);
+        cx.notify();
+    }
+
+    pub fn add_overlays_with_reserve<T: 'static>(
+        &mut self,
+        overlays: impl IntoIterator<Item = Overlay>,
+        reserve: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let list = self.overlay_map.entry(TypeId::of::<T>()).or_default();
+        list.reserve_exact(reserve);
+        list.extend(overlays);
+        cx.notify();
+        println!("overlay_map: {0:?}", self.overlay_map);
+    }
+
+    pub fn clear_overlays<T: 'static>(&mut self, cx: &mut Context<Self>) {
+        self.overlay_map.remove(&TypeId::of::<T>());
+        cx.notify();
     }
 
     pub fn highlight_text<T: 'static>(
@@ -19180,6 +19210,8 @@ pub enum EditorEvent {
     TransactionBegun {
         transaction_id: clock::Lamport,
     },
+    Fold,
+    UnFold,
     Reloaded,
     CursorShapeChanged,
     PushedToNavHistory {
@@ -19960,7 +19992,7 @@ impl RowExt for MultiBufferRow {
     }
 }
 
-trait RowRangeExt {
+pub trait RowRangeExt {
     type Row;
 
     fn len(&self) -> usize;

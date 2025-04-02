@@ -705,7 +705,7 @@ impl Vim {
         });
 
         if VimSettings::get_global(cx).easy_motion.enabled {
-            let easy_motion = EasyMotion::new(window, cx, vim.downgrade());
+            let easy_motion = EasyMotion::new(vim.downgrade(), window, cx);
             editor.register_addon(EasyMotionAddon {
                 _view: easy_motion.clone(),
             });
