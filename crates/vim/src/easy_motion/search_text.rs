@@ -141,7 +141,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fn_serch_no_match() {
+    fn test_fn_search_no_match() {
         let start_row = DisplayRow(0);
         let text = "abc\nabc\nabc";
         let pattern = "def";
