@@ -186,7 +186,9 @@
       "ctrl-w g space": "editor::OpenExcerptsSplit",
       "ctrl-6": "pane::AlternateFile",
 
-      "ctrl-;": ["easy_motion::Word", "both"]
+      // easy_motion
+      ", s w": ["easy_motion::Word", "both"],
+      ", s s": ["easy_motion::NChar", 1]
     }
   },
   {

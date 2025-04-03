@@ -8,7 +8,7 @@ use gpui::{
     Window, actions, impl_actions,
 };
 use schemars::JsonSchema;
-use search::{enumerate_word_beginnings, sort_matches_display};
+use search::{enumerate_points_by_text, enumerate_word_beginnings, sort_matches_display};
 use serde::Deserialize;
 use settings::Settings;
 use text::{Bias, SelectionGoal};
@@ -19,6 +19,7 @@ use crate::{Vim, VimSettings, state::Mode};
 
 mod easy_motion_state;
 mod search;
+mod search_text;
 mod trie;
 
 #[derive(Eq, PartialEq, Copy, Clone, Deserialize, Debug, Default, JsonSchema)]
@@ -34,16 +35,24 @@ pub(crate) enum Direction {
 #[serde(rename_all = "camelCase")]
 struct Word(Direction);
 
-impl_actions!(easy_motion, [Word]);
+#[derive(Clone, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+struct NChar(u8);
+
+impl_actions!(easy_motion, [Word, NChar]);
 
 actions!(easy_motion, [Cancel]);
 
 pub(crate) fn register(editor: &mut Editor, cx: &mut Context<EasyMotion>) {
     EasyMotion::action(editor, cx, EasyMotion::word);
+    EasyMotion::action(editor, cx, EasyMotion::n_char);
     EasyMotion::action(editor, cx, EasyMotion::cancel);
 }
 
 pub(crate) struct EasyMotion {
+    pending_input: bool,
+    record_count: u8,
+    search_pattern: Option<String>,
     state: Option<EasyMotionState>,
     editor: WeakEntity<Editor>,
     vim: WeakEntity<Vim>,
@@ -57,17 +66,15 @@ impl EasyMotion {
     ) -> Entity<Self> {
         let editor = cx.entity().clone();
         cx.new(|cx| {
-            // cx.subscribe(&editor, move |this, editor, event, cx| {
-            //     Self::update_overlays(this, editor, event, *window, cx);
-            // })
-            // .detach();
-
             cx.subscribe_in(&editor, window, Self::update_overlays)
                 .detach();
 
             cx.observe_keystrokes(Self::observe_keystrokes).detach();
 
             Self {
+                pending_input: false,
+                record_count: 0,
+                search_pattern: None,
                 state: None,
                 editor: editor.downgrade(),
                 vim,
@@ -112,7 +119,15 @@ impl EasyMotion {
     ) {
         if event.action.is_some() {
             return;
-        } else if window.has_pending_keystrokes() {
+        }
+
+        if window.has_pending_keystrokes() {
+            return;
+        }
+
+        if self.pending_input {
+            self.record_search_pattern(event);
+            self.overlay_n_char(window, cx);
             return;
         }
 
@@ -147,6 +162,61 @@ impl EasyMotion {
         cx.on_release(|_, _| drop(subscription)).detach();
     }
 
+    fn n_char(&mut self, action: &NChar, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(vim) = self.vim.upgrade() else {
+            return;
+        };
+        let record_count = action.0;
+        self.record_count = record_count;
+
+        vim.update(cx, |vim, cx| {
+            let mode = vim.mode;
+            assert_ne!(mode, Mode::EasyMotion);
+            vim.switch_mode(Mode::EasyMotion, false, window, cx);
+            mode
+        });
+
+        self.pending_input = true;
+        self.search_pattern = Some(String::new());
+    }
+
+    fn record_search_pattern(&mut self, event: &KeystrokeEvent) {
+        if let (Some(text), Some(key)) = (&self.search_pattern, &event.keystroke.key_char) {
+            let new_text = format!("{}{}", text, key);
+            self.search_pattern = Some(new_text);
+        }
+    }
+
+    fn overlay_n_char(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(text) = self.search_pattern.as_ref() else {
+            return;
+        };
+
+        if text.len() < self.record_count as usize {
+            return;
+        }
+
+        let Some((vim, editor)) = self.vim.upgrade().zip(self.editor.upgrade()) else {
+            return;
+        };
+
+        let new_state = editor.update(cx, |editor, cx| {
+            let direction = Direction::Both;
+            let points = enumerate_points_by_text(text, direction, editor, window, cx);
+            Self::handle_new_matches(points, direction, editor, window, cx)
+        });
+
+        let Some(new_state) = new_state else {
+            vim.update(cx, move |vim, cx| {
+                vim.switch_mode(Mode::Normal, false, window, cx);
+            });
+            return;
+        };
+
+        self.state = Some(new_state);
+        self.pending_input = false;
+    }
+
     fn word(&mut self, action: &Word, window: &mut Window, cx: &mut Context<Self>) {
         let direction = action.0;
         self.word_impl(direction, window, cx);
@@ -156,6 +226,7 @@ impl EasyMotion {
         let Some((vim, editor)) = self.vim.upgrade().zip(self.editor.upgrade()) else {
             return;
         };
+
         let mode = vim.update(cx, |vim, cx| {
             let mode = vim.mode;
             assert_ne!(mode, Mode::EasyMotion);
@@ -185,22 +256,22 @@ impl EasyMotion {
         window: &mut Window,
         cx: &mut Context<Editor>,
     ) -> Option<EasyMotionState> {
-        editor.blink_manager.update(cx, |blink, cx| {
-            blink.disable(cx);
-            cx.notify();
-            // blink.hide_cursor(cx);
-        });
-
-        let selections = editor.selections.newest_display(cx);
-        let snapshot = editor.snapshot(window, cx);
-        let map = &snapshot.display_snapshot;
-
         if matches.is_empty() {
             return None;
         }
+
+        editor.blink_manager.update(cx, |blink, cx| {
+            blink.disable(cx);
+            cx.notify();
+        });
+
+        let selections = editor.selections.newest_display(cx);
         sort_matches_display(&mut matches, &selections.start);
 
         let keys = VimSettings::get_global(cx).easy_motion.keys.clone();
+
+        let snapshot = editor.snapshot(window, cx);
+        let display_snapshot = &snapshot.display_snapshot;
 
         let (style_0, style_1, style_2) = Self::get_highlights(cx);
         let trie = Trie::new_from_vec(keys, matches, |depth, point| {
@@ -211,7 +282,7 @@ impl EasyMotion {
             };
             OverlayState {
                 style,
-                offset: point.to_offset(map, Bias::Right),
+                offset: point.to_offset(display_snapshot, Bias::Right),
             }
         });
         Self::add_overlays(
@@ -229,11 +300,11 @@ impl EasyMotion {
             Direction::Forwards => selections.start,
         };
         let end = match direction {
-            Direction::Both | Direction::Forwards => map.max_point(),
+            Direction::Both | Direction::Forwards => display_snapshot.max_point(),
             Direction::Backwards => selections.end,
         };
-        let anchor_start = map.display_point_to_anchor(start, Bias::Left);
-        let anchor_end = map.display_point_to_anchor(end, Bias::Left);
+        let anchor_start = display_snapshot.display_point_to_anchor(start, Bias::Left);
+        let anchor_end = display_snapshot.display_point_to_anchor(end, Bias::Left);
         let highlight = HighlightStyle {
             fade_out: Some(0.7),
             ..Default::default()
@@ -329,12 +400,15 @@ impl EasyMotion {
         let Some((vim, editor)) = self.vim.upgrade().zip(self.editor.upgrade()) else {
             return;
         };
+
         vim.update(cx, |vim, cx| {
             let mode = vim.mode;
             assert_eq!(mode, Mode::EasyMotion);
             vim.switch_mode(Mode::Normal, false, window, cx);
         });
 
+        self.pending_input = false;
+        self.search_pattern = None;
         self.state = None;
         editor.update(cx, Self::clear_editor);
     }
