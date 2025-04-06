@@ -440,7 +440,7 @@ impl Vim {
 
         vim.update(cx, |_, cx| {
             Vim::action(editor, cx, |vim, _: &SwitchToNormalMode, window, cx| {
-                vim.switch_mode(Mode::Normal, false, window, cx)
+                vim.switch_mode(vim.default_mode(cx), false, window, cx)
             });
 
             Vim::action(editor, cx, |vim, _: &SwitchToInsertMode, window, cx| {
@@ -750,6 +750,10 @@ impl Vim {
     ) {
         let subscription = editor.register_action(cx.listener(f));
         cx.on_release(|_, _| drop(subscription)).detach();
+    }
+
+    pub fn default_mode(&self, cx: &App) -> Mode {
+        VimSettings::get_global(cx).default_mode
     }
 
     pub fn editor(&self) -> Option<Entity<Editor>> {
@@ -1123,7 +1127,7 @@ impl Vim {
             }
         }
 
-        if mode == "normal" || mode == "visual" || mode == "operator" {
+        if mode == "normal" || mode == "visual" || mode == "operator" || mode == "helix_normal" {
             context.add("VimControl");
         }
         context.set("vim_mode", mode);
