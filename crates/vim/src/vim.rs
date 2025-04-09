@@ -881,6 +881,7 @@ impl Vim {
             Operator::AddSurrounds { .. }
                 | Operator::ChangeSurrounds { .. }
                 | Operator::DeleteSurrounds
+                | Operator::Exchange
         ) {
             self.operator_stack.clear();
         };
