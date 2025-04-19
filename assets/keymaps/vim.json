@@ -191,7 +191,7 @@
       "ctrl-w space": "editor::OpenExcerptsSplit",
       "ctrl-w g space": "editor::OpenExcerptsSplit",
       "ctrl-6": "pane::AlternateFile",
-
+      "ctrl-^": "pane::AlternateFile",
       // easy_motion
       ", s w": ["easy_motion::Word", "both"],
       ", s s": ["easy_motion::NChar", 1]
@@ -796,8 +796,7 @@
       "{": "project_panel::SelectPrevDirectory",
       "shift-g": "menu::SelectLast",
       "g g": "menu::SelectFirst",
-      "-": "project_panel::SelectParent",
-      "ctrl-6": "pane::AlternateFile"
+      "-": "project_panel::SelectParent"
     }
   },
   {
