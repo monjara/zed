@@ -1036,6 +1036,7 @@ impl Vim {
     }
 
     pub fn cursor_shape(&self, cx: &mut App) -> CursorShape {
+        let cursor_shape = VimSettings::get_global(cx).cursor_shape;
         match self.mode {
             Mode::Normal => {
                 if let Some(operator) = self.operator_stack.last() {
@@ -1053,20 +1054,19 @@ impl Vim {
                         _ => CursorShape::Underline,
                     }
                 } else {
-                    // No operator active -> Block cursor
-                    CursorShape::Block
+                    cursor_shape.normal.unwrap_or(CursorShape::Block)
                 }
             }
-            Mode::Replace => CursorShape::Underline,
-            Mode::HelixNormal
-            | Mode::Visual
-            | Mode::VisualLine
-            | Mode::VisualBlock
-            | Mode::EasyMotion => CursorShape::Block,
-            Mode::Insert => {
+            Mode::EasyMotion => CursorShape::Block,
+            Mode::HelixNormal => cursor_shape.normal.unwrap_or(CursorShape::Block),
+            Mode::Replace => cursor_shape.replace.unwrap_or(CursorShape::Underline),
+            Mode::Visual | Mode::VisualLine | Mode::VisualBlock => {
+                cursor_shape.visual.unwrap_or(CursorShape::Block)
+            }
+            Mode::Insert => cursor_shape.insert.unwrap_or({
                 let editor_settings = EditorSettings::get_global(cx);
                 editor_settings.cursor_shape.unwrap_or_default()
-            }
+            }),
         }
     }
 
@@ -1719,6 +1719,27 @@ pub struct EasyMotionSettings {
     keys: String,
 }
 
+/// The settings for cursor shape.
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+struct CursorShapeSettings {
+    /// Cursor shape for the normal mode.
+    ///
+    /// Default: block
+    pub normal: Option<CursorShape>,
+    /// Cursor shape for the replace mode.
+    ///
+    /// Default: underline
+    pub replace: Option<CursorShape>,
+    /// Cursor shape for the visual mode.
+    ///
+    /// Default: block
+    pub visual: Option<CursorShape>,
+    /// Cursor shape for the insert mode.
+    ///
+    /// The default value follows the primary cursor_shape.
+    pub insert: Option<CursorShape>,
+}
+
 #[derive(Deserialize)]
 struct VimSettings {
     pub default_mode: Mode,
@@ -1729,6 +1750,7 @@ struct VimSettings {
     pub custom_digraphs: HashMap<String, Arc<str>>,
     pub highlight_on_yank_duration: u64,
     pub easy_motion: EasyMotionSettings,
+    pub cursor_shape: CursorShapeSettings,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize, JsonSchema)]
@@ -1741,6 +1763,7 @@ struct VimSettingsContent {
     pub custom_digraphs: Option<HashMap<String, Arc<str>>>,
     pub highlight_on_yank_duration: Option<u64>,
     pub easy_motion: Option<EasyMotionSettings>,
+    pub cursor_shape: Option<CursorShapeSettings>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize, JsonSchema)]
@@ -1800,6 +1823,7 @@ impl Settings for VimSettings {
                 .highlight_on_yank_duration
                 .ok_or_else(Self::missing_default)?,
             easy_motion: settings.easy_motion.ok_or_else(Self::missing_default)?,
+            cursor_shape: settings.cursor_shape.ok_or_else(Self::missing_default)?,
         })
     }
 }

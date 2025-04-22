@@ -16,7 +16,7 @@ use git::repository::DiffType;
 use gpui::{App, AppContext, Context, Entity, EventEmitter, SharedString, Task, WeakEntity};
 use language_model::{
     ConfiguredModel, LanguageModel, LanguageModelCompletionEvent, LanguageModelId,
-    LanguageModelKnownError, LanguageModelRegistry, LanguageModelRequest,
+    LanguageModelImage, LanguageModelKnownError, LanguageModelRegistry, LanguageModelRequest,
     LanguageModelRequestMessage, LanguageModelRequestTool, LanguageModelToolResult,
     LanguageModelToolUseId, MaxMonthlySpendReachedError, MessageContent,
     ModelRequestLimitReachedError, PaymentRequiredError, RequestUsage, Role, StopReason,
@@ -38,14 +38,7 @@ use crate::thread_store::{
     SerializedMessage, SerializedMessageSegment, SerializedThread, SerializedToolResult,
     SerializedToolUse, SharedProjectContext,
 };
-use crate::tool_use::{PendingToolUse, ToolUse, ToolUseState, USING_TOOL_MARKER};
-
-#[derive(Debug, Clone, Copy)]
-pub enum RequestKind {
-    Chat,
-    /// Used when summarizing a thread.
-    Summarize,
-}
+use crate::tool_use::{PendingToolUse, ToolUse, ToolUseMetadata, ToolUseState};
 
 #[derive(
     Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Serialize, Deserialize, JsonSchema,
@@ -104,6 +97,7 @@ pub struct Message {
     pub role: Role,
     pub segments: Vec<MessageSegment>,
     pub context: String,
+    pub images: Vec<LanguageModelImage>,
 }
 
 impl Message {
@@ -113,12 +107,21 @@ impl Message {
         self.segments.iter().all(|segment| segment.should_display())
     }
 
-    pub fn push_thinking(&mut self, text: &str) {
-        if let Some(MessageSegment::Thinking(segment)) = self.segments.last_mut() {
+    pub fn push_thinking(&mut self, text: &str, signature: Option<String>) {
+        if let Some(MessageSegment::Thinking {
+            text: segment,
+            signature: current_signature,
+        }) = self.segments.last_mut()
+        {
+            if let Some(signature) = signature {
+                *current_signature = Some(signature);
+            }
             segment.push_str(text);
         } else {
-            self.segments
-                .push(MessageSegment::Thinking(text.to_string()));
+            self.segments.push(MessageSegment::Thinking {
+                text: text.to_string(),
+                signature,
+            });
         }
     }
 
@@ -140,11 +143,12 @@ impl Message {
         for segment in &self.segments {
             match segment {
                 MessageSegment::Text(text) => result.push_str(text),
-                MessageSegment::Thinking(text) => {
-                    result.push_str("<think>");
+                MessageSegment::Thinking { text, .. } => {
+                    result.push_str("<think>\n");
                     result.push_str(text);
-                    result.push_str("</think>");
+                    result.push_str("\n</think>");
                 }
+                MessageSegment::RedactedThinking(_) => {}
             }
         }
 
@@ -155,24 +159,19 @@ impl Message {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageSegment {
     Text(String),
-    Thinking(String),
+    Thinking {
+        text: String,
+        signature: Option<String>,
+    },
+    RedactedThinking(Vec<u8>),
 }
 
 impl MessageSegment {
-    pub fn text_mut(&mut self) -> &mut String {
-        match self {
-            Self::Text(text) => text,
-            Self::Thinking(text) => text,
-        }
-    }
-
     pub fn should_display(&self) -> bool {
-        // We add USING_TOOL_MARKER when making a request that includes tool uses
-        // without non-whitespace text around them, and this can cause the model
-        // to mimic the pattern, so we consider those segments not displayable.
         match self {
-            Self::Text(text) => text.is_empty() || text.trim() == USING_TOOL_MARKER,
-            Self::Thinking(text) => text.is_empty() || text.trim() == USING_TOOL_MARKER,
+            Self::Text(text) => text.is_empty(),
+            Self::Thinking { text, .. } => text.is_empty(),
+            Self::RedactedThinking(_) => false,
         }
     }
 }
@@ -408,12 +407,16 @@ impl Thread {
                         .into_iter()
                         .map(|segment| match segment {
                             SerializedMessageSegment::Text { text } => MessageSegment::Text(text),
-                            SerializedMessageSegment::Thinking { text } => {
-                                MessageSegment::Thinking(text)
+                            SerializedMessageSegment::Thinking { text, signature } => {
+                                MessageSegment::Thinking { text, signature }
+                            }
+                            SerializedMessageSegment::RedactedThinking { data } => {
+                                MessageSegment::RedactedThinking(data)
                             }
                         })
                         .collect(),
                     context: message.context,
+                    images: Vec::new(),
                 })
                 .collect(),
             next_message_id,
@@ -746,6 +749,19 @@ impl Thread {
                 }
             }
 
+            if let Some(message) = self.messages.iter_mut().find(|m| m.id == message_id) {
+                message.images = new_context
+                    .iter()
+                    .filter_map(|context| {
+                        if let AssistantContext::Image(image_context) = context {
+                            image_context.image_task.clone().now_or_never().flatten()
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+            }
+
             self.action_log.update(cx, |log, cx| {
                 // Track all buffers added as context
                 for ctx in &new_context {
@@ -764,13 +780,16 @@ impl Thread {
                                 cx,
                             );
                         }
-                        AssistantContext::Excerpt(excerpt_context) => {
+                        AssistantContext::Selection(selection_context) => {
                             log.buffer_added_as_context(
-                                excerpt_context.context_buffer.buffer.clone(),
+                                selection_context.context_buffer.buffer.clone(),
                                 cx,
                             );
                         }
-                        AssistantContext::FetchedUrl(_) | AssistantContext::Thread(_) => {}
+                        AssistantContext::FetchedUrl(_)
+                        | AssistantContext::Thread(_)
+                        | AssistantContext::Rules(_)
+                        | AssistantContext::Image(_) => {}
                     }
                 }
             });
@@ -811,6 +830,7 @@ impl Thread {
             role,
             segments,
             context: String::new(),
+            images: Vec::new(),
         });
         self.touch_updated_at();
         cx.emit(ThreadEvent::MessageAdded(id));
@@ -862,9 +882,10 @@ impl Thread {
             for segment in &message.segments {
                 match segment {
                     MessageSegment::Text(content) => text.push_str(content),
-                    MessageSegment::Thinking(content) => {
+                    MessageSegment::Thinking { text: content, .. } => {
                         text.push_str(&format!("<think>{}</think>", content))
                     }
+                    MessageSegment::RedactedThinking(_) => {}
                 }
             }
             text.push('\n');
@@ -894,8 +915,16 @@ impl Thread {
                                 MessageSegment::Text(text) => {
                                     SerializedMessageSegment::Text { text: text.clone() }
                                 }
-                                MessageSegment::Thinking(text) => {
-                                    SerializedMessageSegment::Thinking { text: text.clone() }
+                                MessageSegment::Thinking { text, signature } => {
+                                    SerializedMessageSegment::Thinking {
+                                        text: text.clone(),
+                                        signature: signature.clone(),
+                                    }
+                                }
+                                MessageSegment::RedactedThinking(data) => {
+                                    SerializedMessageSegment::RedactedThinking {
+                                        data: data.clone(),
+                                    }
                                 }
                             })
                             .collect(),
@@ -929,13 +958,8 @@ impl Thread {
         })
     }
 
-    pub fn send_to_model(
-        &mut self,
-        model: Arc<dyn LanguageModel>,
-        request_kind: RequestKind,
-        cx: &mut Context<Self>,
-    ) {
-        let mut request = self.to_completion_request(request_kind, cx);
+    pub fn send_to_model(&mut self, model: Arc<dyn LanguageModel>, cx: &mut Context<Self>) {
+        let mut request = self.to_completion_request(cx);
         if model.supports_tools() {
             request.tools = {
                 let mut tools = Vec::new();
@@ -974,11 +998,7 @@ impl Thread {
         false
     }
 
-    pub fn to_completion_request(
-        &self,
-        request_kind: RequestKind,
-        cx: &mut Context<Self>,
-    ) -> LanguageModelRequest {
+    pub fn to_completion_request(&self, cx: &mut Context<Self>) -> LanguageModelRequest {
         let mut request = LanguageModelRequest {
             thread_id: Some(self.id.to_string()),
             prompt_id: Some(self.last_prompt_id.to_string()),
@@ -1025,34 +1045,57 @@ impl Thread {
                 cache: false,
             };
 
-            match request_kind {
-                RequestKind::Chat => {
-                    self.tool_use
-                        .attach_tool_results(message.id, &mut request_message);
-                }
-                RequestKind::Summarize => {
-                    // We don't care about tool use during summarization.
-                    if self.tool_use.message_has_tool_results(message.id) {
-                        continue;
-                    }
-                }
-            }
+            self.tool_use
+                .attach_tool_results(message.id, &mut request_message);
 
-            if !message.segments.is_empty() {
+            if !message.context.is_empty() {
                 request_message
                     .content
-                    .push(MessageContent::Text(message.to_string()));
+                    .push(MessageContent::Text(message.context.to_string()));
             }
 
-            match request_kind {
-                RequestKind::Chat => {
-                    self.tool_use
-                        .attach_tool_uses(message.id, &mut request_message);
+            if !message.images.is_empty() {
+                // Some providers only support image parts after an initial text part
+                if request_message.content.is_empty() {
+                    request_message
+                        .content
+                        .push(MessageContent::Text("Images attached by user:".to_string()));
                 }
-                RequestKind::Summarize => {
-                    // We don't care about tool use during summarization.
+
+                for image in &message.images {
+                    request_message
+                        .content
+                        .push(MessageContent::Image(image.clone()))
                 }
-            };
+            }
+
+            for segment in &message.segments {
+                match segment {
+                    MessageSegment::Text(text) => {
+                        if !text.is_empty() {
+                            request_message
+                                .content
+                                .push(MessageContent::Text(text.into()));
+                        }
+                    }
+                    MessageSegment::Thinking { text, signature } => {
+                        if !text.is_empty() {
+                            request_message.content.push(MessageContent::Thinking {
+                                text: text.into(),
+                                signature: signature.clone(),
+                            });
+                        }
+                    }
+                    MessageSegment::RedactedThinking(data) => {
+                        request_message
+                            .content
+                            .push(MessageContent::RedactedThinking(data.clone()));
+                    }
+                };
+            }
+
+            self.tool_use
+                .attach_tool_uses(message.id, &mut request_message);
 
             request.messages.push(request_message);
         }
@@ -1063,6 +1106,54 @@ impl Thread {
         }
 
         self.attached_tracked_files_state(&mut request.messages, cx);
+
+        request
+    }
+
+    fn to_summarize_request(&self, added_user_message: String) -> LanguageModelRequest {
+        let mut request = LanguageModelRequest {
+            thread_id: None,
+            prompt_id: None,
+            messages: vec![],
+            tools: Vec::new(),
+            stop: Vec::new(),
+            temperature: None,
+        };
+
+        for message in &self.messages {
+            let mut request_message = LanguageModelRequestMessage {
+                role: message.role,
+                content: Vec::new(),
+                cache: false,
+            };
+
+            // Skip tool results during summarization.
+            if self.tool_use.message_has_tool_results(message.id) {
+                continue;
+            }
+
+            for segment in &message.segments {
+                match segment {
+                    MessageSegment::Text(text) => request_message
+                        .content
+                        .push(MessageContent::Text(text.clone())),
+                    MessageSegment::Thinking { .. } => {}
+                    MessageSegment::RedactedThinking(_) => {}
+                }
+            }
+
+            if request_message.content.is_empty() {
+                continue;
+            }
+
+            request.messages.push(request_message);
+        }
+
+        request.messages.push(LanguageModelRequestMessage {
+            role: Role::User,
+            content: vec![MessageContent::Text(added_user_message)],
+            cache: false,
+        });
 
         request
     }
@@ -1120,6 +1211,12 @@ impl Thread {
             None
         };
         let prompt_id = self.last_prompt_id.clone();
+        let tool_use_metadata = ToolUseMetadata {
+            model: model.clone(),
+            thread_id: self.id.clone(),
+            prompt_id: prompt_id.clone(),
+        };
+
         let task = cx.spawn(async move |thread, cx| {
             let stream_completion_future = model.stream_completion_with_usage(request, &cx);
             let initial_token_usage =
@@ -1166,6 +1263,7 @@ impl Thread {
                                 current_token_usage = token_usage;
                             }
                             LanguageModelCompletionEvent::Text(chunk) => {
+                                cx.emit(ThreadEvent::ReceivedTextChunk);
                                 if let Some(last_message) = thread.messages.last_mut() {
                                     if last_message.role == Role::Assistant {
                                         last_message.push_text(&chunk);
@@ -1187,10 +1285,13 @@ impl Thread {
                                     };
                                 }
                             }
-                            LanguageModelCompletionEvent::Thinking(chunk) => {
+                            LanguageModelCompletionEvent::Thinking {
+                                text: chunk,
+                                signature,
+                            } => {
                                 if let Some(last_message) = thread.messages.last_mut() {
                                     if last_message.role == Role::Assistant {
-                                        last_message.push_thinking(&chunk);
+                                        last_message.push_thinking(&chunk, signature);
                                         cx.emit(ThreadEvent::StreamedAssistantThinking(
                                             last_message.id,
                                             chunk,
@@ -1203,7 +1304,10 @@ impl Thread {
                                         // will result in duplicating the text of the chunk in the rendered Markdown.
                                         thread.insert_message(
                                             Role::Assistant,
-                                            vec![MessageSegment::Thinking(chunk.to_string())],
+                                            vec![MessageSegment::Thinking {
+                                                text: chunk.to_string(),
+                                                signature,
+                                            }],
                                             cx,
                                         );
                                     };
@@ -1219,11 +1323,27 @@ impl Thread {
                                         thread.insert_message(Role::Assistant, vec![], cx)
                                     });
 
-                                thread.tool_use.request_tool_use(
+                                let tool_use_id = tool_use.id.clone();
+                                let streamed_input = if tool_use.is_input_complete {
+                                    None
+                                } else {
+                                    Some((&tool_use.input).clone())
+                                };
+
+                                let ui_text = thread.tool_use.request_tool_use(
                                     last_assistant_message_id,
                                     tool_use,
+                                    tool_use_metadata.clone(),
                                     cx,
                                 );
+
+                                if let Some(input) = streamed_input {
+                                    cx.emit(ThreadEvent::StreamedToolUse {
+                                        tool_use_id,
+                                        ui_text,
+                                        input,
+                                    });
+                                }
                             }
                         }
 
@@ -1242,7 +1362,12 @@ impl Thread {
                         .pending_completions
                         .retain(|completion| completion.id != pending_completion_id);
 
-                    if thread.summary.is_none() && thread.messages.len() >= 2 {
+                    // If there is a response without tool use, summarize the message. Otherwise,
+                    // allow two tool uses before summarizing.
+                    if thread.summary.is_none()
+                        && thread.messages.len() >= 2
+                        && (!thread.has_pending_tool_uses() || thread.messages.len() >= 6)
+                    {
                         thread.summarize(cx);
                     }
                 })?;
@@ -1352,18 +1477,12 @@ impl Thread {
             return;
         }
 
-        let mut request = self.to_completion_request(RequestKind::Summarize, cx);
-        request.messages.push(LanguageModelRequestMessage {
-            role: Role::User,
-            content: vec![
-                "Generate a concise 3-7 word title for this conversation, omitting punctuation. \
-                 Go straight to the title, without any preamble and prefix like `Here's a concise suggestion:...` or `Title:`. \
-                 If the conversation is about a specific subject, include it in the title. \
-                 Be descriptive. DO NOT speak in the first person."
-                    .into(),
-            ],
-            cache: false,
-        });
+        let added_user_message = "Generate a concise 3-7 word title for this conversation, omitting punctuation. \
+            Go straight to the title, without any preamble and prefix like `Here's a concise suggestion:...` or `Title:`. \
+            If the conversation is about a specific subject, include it in the title. \
+            Be descriptive. DO NOT speak in the first person.";
+
+        let request = self.to_summarize_request(added_user_message.into());
 
         self.pending_summary = cx.spawn(async move |this, cx| {
             async move {
@@ -1425,21 +1544,14 @@ impl Thread {
             return None;
         }
 
-        let mut request = self.to_completion_request(RequestKind::Summarize, cx);
+        let added_user_message = "Generate a detailed summary of this conversation. Include:\n\
+             1. A brief overview of what was discussed\n\
+             2. Key facts or information discovered\n\
+             3. Outcomes or conclusions reached\n\
+             4. Any action items or next steps if any\n\
+             Format it in Markdown with headings and bullet points.";
 
-        request.messages.push(LanguageModelRequestMessage {
-            role: Role::User,
-            content: vec![
-                "Generate a detailed summary of this conversation. Include:\n\
-                1. A brief overview of what was discussed\n\
-                2. Key facts or information discovered\n\
-                3. Outcomes or conclusions reached\n\
-                4. Any action items or next steps if any\n\
-                Format it in Markdown with headings and bullet points."
-                    .into(),
-            ],
-            cache: false,
-        });
+        let request = self.to_summarize_request(added_user_message.into());
 
         let task = cx.spawn(async move |thread, cx| {
             let stream = model.stream_completion_text(request, &cx);
@@ -1487,7 +1599,7 @@ impl Thread {
 
     pub fn use_pending_tools(&mut self, cx: &mut Context<Self>) -> Vec<PendingToolUse> {
         self.auto_capture_telemetry(cx);
-        let request = self.to_completion_request(RequestKind::Chat, cx);
+        let request = self.to_completion_request(cx);
         let messages = Arc::new(request.messages);
         let pending_tool_uses = self
             .tool_use
@@ -1599,7 +1711,7 @@ impl Thread {
             if let Some(ConfiguredModel { model, .. }) = model_registry.default_model() {
                 self.attach_tool_results(cx);
                 if !canceled {
-                    self.send_to_model(model, RequestKind::Chat, cx);
+                    self.send_to_model(model, cx);
                 }
             }
         }
@@ -1612,9 +1724,10 @@ impl Thread {
 
     /// Insert an empty message to be populated with tool results upon send.
     pub fn attach_tool_results(&mut self, cx: &mut Context<Self>) {
-        // TODO: Don't insert a dummy user message here. Ensure this works with the thinking model.
-        // Insert a user message to contain the tool results.
-        self.insert_user_message("Here are the tool results.", Vec::new(), None, cx);
+        // Tool results are assumed to be waiting on the next message id, so they will populate
+        // this empty message before sending to model. Would prefer this to be more straightforward.
+        self.insert_message(Role::User, vec![], cx);
+        self.auto_capture_telemetry(cx);
     }
 
     /// Cancels the last pending completion, if there are any pending.
@@ -1700,7 +1813,7 @@ impl Thread {
                 thread_data,
                 final_project_snapshot
             );
-            client.telemetry().flush_events();
+            client.telemetry().flush_events().await;
 
             Ok(())
         })
@@ -1745,7 +1858,7 @@ impl Thread {
                     thread_data,
                     final_project_snapshot
                 );
-                client.telemetry().flush_events();
+                client.telemetry().flush_events().await;
 
                 Ok(())
             })
@@ -1893,9 +2006,10 @@ impl Thread {
             for segment in &message.segments {
                 match segment {
                     MessageSegment::Text(text) => writeln!(markdown, "{}\n", text)?,
-                    MessageSegment::Thinking(text) => {
-                        writeln!(markdown, "<think>{}</think>\n", text)?
+                    MessageSegment::Thinking { text, .. } => {
+                        writeln!(markdown, "<think>\n{}\n</think>\n", text)?
                     }
+                    MessageSegment::RedactedThinking(_) => {}
                 }
             }
 
@@ -2000,7 +2114,7 @@ impl Thread {
                             github_login = github_login
                         );
 
-                        client.telemetry().flush_events();
+                        client.telemetry().flush_events().await;
                     }
                 }
             })
@@ -2118,8 +2232,14 @@ pub enum ThreadEvent {
     ShowError(ThreadError),
     UsageUpdated(RequestUsage),
     StreamedCompletion,
+    ReceivedTextChunk,
     StreamedAssistantText(MessageId, String),
     StreamedAssistantThinking(MessageId, String),
+    StreamedToolUse {
+        tool_use_id: LanguageModelToolUseId,
+        ui_text: Arc<str>,
+        input: serde_json::Value,
+    },
     Stopped(Result<StopReason, Arc<anyhow::Error>>),
     MessageAdded(MessageId),
     MessageEdited(MessageId),
@@ -2222,9 +2342,7 @@ fn main() {{
         assert_eq!(message.context, expected_context);
 
         // Check message in request
-        let request = thread.update(cx, |thread, cx| {
-            thread.to_completion_request(RequestKind::Chat, cx)
-        });
+        let request = thread.update(cx, |thread, cx| thread.to_completion_request(cx));
 
         assert_eq!(request.messages.len(), 2);
         let expected_full_message = format!("{}Please explain this code", expected_context);
@@ -2314,9 +2432,7 @@ fn main() {{
         assert!(message3.context.contains("file3.rs"));
 
         // Check entire request to make sure all contexts are properly included
-        let request = thread.update(cx, |thread, cx| {
-            thread.to_completion_request(RequestKind::Chat, cx)
-        });
+        let request = thread.update(cx, |thread, cx| thread.to_completion_request(cx));
 
         // The request should contain all 3 messages
         assert_eq!(request.messages.len(), 4);
@@ -2366,9 +2482,7 @@ fn main() {{
         assert_eq!(message.context, "");
 
         // Check message in request
-        let request = thread.update(cx, |thread, cx| {
-            thread.to_completion_request(RequestKind::Chat, cx)
-        });
+        let request = thread.update(cx, |thread, cx| thread.to_completion_request(cx));
 
         assert_eq!(request.messages.len(), 2);
         assert_eq!(
@@ -2386,9 +2500,7 @@ fn main() {{
         assert_eq!(message2.context, "");
 
         // Check that both messages appear in the request
-        let request = thread.update(cx, |thread, cx| {
-            thread.to_completion_request(RequestKind::Chat, cx)
-        });
+        let request = thread.update(cx, |thread, cx| thread.to_completion_request(cx));
 
         assert_eq!(request.messages.len(), 3);
         assert_eq!(
@@ -2428,9 +2540,7 @@ fn main() {{
         });
 
         // Create a request and check that it doesn't have a stale buffer warning yet
-        let initial_request = thread.update(cx, |thread, cx| {
-            thread.to_completion_request(RequestKind::Chat, cx)
-        });
+        let initial_request = thread.update(cx, |thread, cx| thread.to_completion_request(cx));
 
         // Make sure we don't have a stale file warning yet
         let has_stale_warning = initial_request.messages.iter().any(|msg| {
@@ -2458,9 +2568,7 @@ fn main() {{
         });
 
         // Create a new request and check for the stale buffer warning
-        let new_request = thread.update(cx, |thread, cx| {
-            thread.to_completion_request(RequestKind::Chat, cx)
-        });
+        let new_request = thread.update(cx, |thread, cx| thread.to_completion_request(cx));
 
         // We should have a stale file warning as the last message
         let last_message = new_request
