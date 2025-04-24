@@ -22,15 +22,16 @@ mod schema;
 mod symbol_info_tool;
 mod terminal_tool;
 mod thinking_tool;
+mod ui;
 mod web_search_tool;
 
 use std::sync::Arc;
 
 use assistant_tool::ToolRegistry;
 use copy_path_tool::CopyPathTool;
-use feature_flags::FeatureFlagAppExt;
 use gpui::App;
 use http_client::HttpClientWithUrl;
+use language_model::LanguageModelRegistry;
 use move_path_tool::MovePathTool;
 use web_search_tool::WebSearchTool;
 
@@ -54,6 +55,11 @@ use crate::rename_tool::RenameTool;
 use crate::symbol_info_tool::SymbolInfoTool;
 use crate::terminal_tool::TerminalTool;
 use crate::thinking_tool::ThinkingTool;
+
+pub use create_file_tool::CreateFileToolInput;
+pub use edit_file_tool::EditFileToolInput;
+pub use path_search_tool::PathSearchToolInput;
+pub use read_file_tool::ReadFileToolInput;
 
 pub fn init(http_client: Arc<HttpClientWithUrl>, cx: &mut App) {
     assistant_tool::init(cx);
@@ -82,34 +88,45 @@ pub fn init(http_client: Arc<HttpClientWithUrl>, cx: &mut App) {
     registry.register_tool(ThinkingTool);
     registry.register_tool(FetchTool::new(http_client));
 
-    cx.observe_flag::<feature_flags::ZedProWebSearchTool, _>({
-        move |is_enabled, cx| {
-            if is_enabled {
-                ToolRegistry::global(cx).register_tool(WebSearchTool);
-            } else {
-                ToolRegistry::global(cx).unregister_tool(WebSearchTool);
+    cx.subscribe(
+        &LanguageModelRegistry::global(cx),
+        move |registry, event, cx| match event {
+            language_model::Event::DefaultModelChanged => {
+                let using_zed_provider = registry
+                    .read(cx)
+                    .default_model()
+                    .map_or(false, |default| default.is_provided_by_zed());
+                if using_zed_provider {
+                    ToolRegistry::global(cx).register_tool(WebSearchTool);
+                } else {
+                    ToolRegistry::global(cx).unregister_tool(WebSearchTool);
+                }
             }
-        }
-    })
+            _ => {}
+        },
+    )
     .detach();
 }
 
 #[cfg(test)]
 mod tests {
+    use client::Client;
+    use clock::FakeSystemClock;
     use http_client::FakeHttpClient;
 
     use super::*;
 
     #[gpui::test]
     fn test_builtin_tool_schema_compatibility(cx: &mut App) {
-        crate::init(
-            Arc::new(http_client::HttpClientWithUrl::new(
-                FakeHttpClient::with_200_response(),
-                "https://zed.dev",
-                None,
-            )),
+        settings::init(cx);
+
+        let client = Client::new(
+            Arc::new(FakeSystemClock::new()),
+            FakeHttpClient::with_200_response(),
             cx,
         );
+        language_model::init(client.clone(), cx);
+        crate::init(client.http_client(), cx);
 
         for tool in ToolRegistry::global(cx).tools() {
             let actual_schema = tool
