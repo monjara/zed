@@ -1,4 +1,7 @@
-use crate::code_context_menus::{CompletionsMenu, SortableMatch};
+use crate::{
+    code_context_menus::{CompletionsMenu, SortableMatch},
+    editor_settings::SnippetSortOrder,
+};
 use fuzzy::StringMatch;
 use gpui::TestAppContext;
 
@@ -74,7 +77,7 @@ fn test_sort_matches_local_variable_over_global_variable(_cx: &mut TestAppContex
             sort_key: (2, "floorf128"),
         },
     ];
-    CompletionsMenu::sort_matches(&mut matches, query);
+    CompletionsMenu::sort_matches(&mut matches, query, SnippetSortOrder::default());
     assert_eq!(
         matches[0].string_match.string.as_str(),
         "foo_bar_qux",
@@ -122,7 +125,7 @@ fn test_sort_matches_local_variable_over_global_variable(_cx: &mut TestAppContex
             sort_key: (1, "foo_bar_qux"),
         },
     ];
-    CompletionsMenu::sort_matches(&mut matches, query);
+    CompletionsMenu::sort_matches(&mut matches, query, SnippetSortOrder::default());
     assert_eq!(
         matches[0].string_match.string.as_str(),
         "foo_bar_qux",
@@ -185,7 +188,7 @@ fn test_sort_matches_local_variable_over_global_enum(_cx: &mut TestAppContext) {
             sort_key: (0, "while let"),
         },
     ];
-    CompletionsMenu::sort_matches(&mut matches, query);
+    CompletionsMenu::sort_matches(&mut matches, query, SnippetSortOrder::default());
     assert_eq!(
         matches[0].string_match.string.as_str(),
         "element_type",
@@ -234,7 +237,7 @@ fn test_sort_matches_local_variable_over_global_enum(_cx: &mut TestAppContext) {
             sort_key: (2, "REPLACEMENT_CHARACTER"),
         },
     ];
-    CompletionsMenu::sort_matches(&mut matches, query);
+    CompletionsMenu::sort_matches(&mut matches, query, SnippetSortOrder::default());
     assert_eq!(
         matches[0].string_match.string.as_str(),
         "element_type",
@@ -272,7 +275,7 @@ fn test_sort_matches_local_variable_over_global_enum(_cx: &mut TestAppContext) {
             sort_key: (1, "element_type"),
         },
     ];
-    CompletionsMenu::sort_matches(&mut matches, query);
+    CompletionsMenu::sort_matches(&mut matches, query, SnippetSortOrder::default());
     assert_eq!(
         matches[0].string_match.string.as_str(),
         "ElementType",
@@ -335,7 +338,7 @@ fn test_sort_matches_for_unreachable(_cx: &mut TestAppContext) {
             sort_key: (2, "unreachable_unchecked"),
         },
     ];
-    CompletionsMenu::sort_matches(&mut matches, query);
+    CompletionsMenu::sort_matches(&mut matches, query, SnippetSortOrder::default());
     assert_eq!(
         matches[0].string_match.string.as_str(),
         "unreachable!(…)",
@@ -379,7 +382,7 @@ fn test_sort_matches_for_unreachable(_cx: &mut TestAppContext) {
             sort_key: (3, "unreachable_unchecked"),
         },
     ];
-    CompletionsMenu::sort_matches(&mut matches, query);
+    CompletionsMenu::sort_matches(&mut matches, query, SnippetSortOrder::default());
     assert_eq!(
         matches[0].string_match.string.as_str(),
         "unreachable!(…)",
@@ -423,7 +426,7 @@ fn test_sort_matches_for_unreachable(_cx: &mut TestAppContext) {
             sort_key: (2, "unreachable_unchecked"),
         },
     ];
-    CompletionsMenu::sort_matches(&mut matches, query);
+    CompletionsMenu::sort_matches(&mut matches, query, SnippetSortOrder::default());
     assert_eq!(
         matches[0].string_match.string.as_str(),
         "unreachable!(…)",
@@ -467,7 +470,7 @@ fn test_sort_matches_for_unreachable(_cx: &mut TestAppContext) {
             sort_key: (2, "unreachable_unchecked"),
         },
     ];
-    CompletionsMenu::sort_matches(&mut matches, query);
+    CompletionsMenu::sort_matches(&mut matches, query, SnippetSortOrder::default());
     assert_eq!(
         matches[0].string_match.string.as_str(),
         "unreachable!(…)",
@@ -503,7 +506,7 @@ fn test_sort_matches_variable_and_constants_over_function(_cx: &mut TestAppConte
             sort_key: (1, "var"), // variable
         },
     ];
-    CompletionsMenu::sort_matches(&mut matches, query);
+    CompletionsMenu::sort_matches(&mut matches, query, SnippetSortOrder::default());
     assert_eq!(
         matches[0].string_match.candidate_id, 1,
         "Match order not expected"
@@ -539,7 +542,7 @@ fn test_sort_matches_variable_and_constants_over_function(_cx: &mut TestAppConte
             sort_key: (2, "var"), // constant
         },
     ];
-    CompletionsMenu::sort_matches(&mut matches, query);
+    CompletionsMenu::sort_matches(&mut matches, query, SnippetSortOrder::default());
     assert_eq!(
         matches[0].string_match.candidate_id, 1,
         "Match order not expected"
@@ -622,7 +625,7 @@ fn test_sort_matches_jsx_event_handler(_cx: &mut TestAppContext) {
             sort_key: (3, "className?"),
         },
     ];
-    CompletionsMenu::sort_matches(&mut matches, query);
+    CompletionsMenu::sort_matches(&mut matches, query, SnippetSortOrder::default());
     assert_eq!(
         matches[0].string_match.string, "onCut?",
         "Match order not expected"
@@ -944,7 +947,7 @@ fn test_sort_matches_jsx_event_handler(_cx: &mut TestAppContext) {
             sort_key: (3, "onLoadedData?"),
         },
     ];
-    CompletionsMenu::sort_matches(&mut matches, query);
+    CompletionsMenu::sort_matches(&mut matches, query, SnippetSortOrder::default());
     assert_eq!(
         matches
             .iter()
@@ -996,10 +999,159 @@ fn test_sort_matches_for_snippets(_cx: &mut TestAppContext) {
             sort_key: (2, "println!(…)"),
         },
     ];
-    CompletionsMenu::sort_matches(&mut matches, query);
+    CompletionsMenu::sort_matches(&mut matches, query, SnippetSortOrder::Top);
     assert_eq!(
         matches[0].string_match.string.as_str(),
         "println!(…)",
         "Match order not expected"
+    );
+}
+
+#[gpui::test]
+fn test_sort_matches_for_exact_match(_cx: &mut TestAppContext) {
+    // Case 1: "set_text"
+    let query: Option<&str> = Some("set_text");
+    let mut matches: Vec<SortableMatch<'_>> = vec![
+        SortableMatch {
+            string_match: StringMatch {
+                candidate_id: 0,
+                score: 1.0,
+                positions: vec![],
+                string: "set_text".to_string(),
+            },
+            is_snippet: false,
+            sort_text: Some("7fffffff"),
+            sort_key: (3, "set_text"),
+        },
+        SortableMatch {
+            string_match: StringMatch {
+                candidate_id: 0,
+                score: 0.32000000000000006,
+                positions: vec![],
+                string: "set_placeholder_text".to_string(),
+            },
+            is_snippet: false,
+            sort_text: Some("7fffffff"),
+            sort_key: (3, "set_placeholder_text"),
+        },
+        SortableMatch {
+            string_match: StringMatch {
+                candidate_id: 0,
+                score: 0.32,
+                positions: vec![],
+                string: "set_text_style_refinement".to_string(),
+            },
+            is_snippet: false,
+            sort_text: Some("7fffffff"),
+            sort_key: (3, "set_text_style_refinement"),
+        },
+        SortableMatch {
+            string_match: StringMatch {
+                candidate_id: 0,
+                score: 0.16666666666666666,
+                positions: vec![],
+                string: "set_context_menu_options".to_string(),
+            },
+            is_snippet: false,
+            sort_text: Some("7fffffff"),
+            sort_key: (3, "set_context_menu_options"),
+        },
+        SortableMatch {
+            string_match: StringMatch {
+                candidate_id: 0,
+                score: 0.08695652173913043,
+                positions: vec![],
+                string: "select_to_next_word_end".to_string(),
+            },
+            is_snippet: false,
+            sort_text: Some("7fffffff"),
+            sort_key: (3, "select_to_next_word_end"),
+        },
+        SortableMatch {
+            string_match: StringMatch {
+                candidate_id: 0,
+                score: 0.07692307692307693,
+                positions: vec![],
+                string: "select_to_next_subword_end".to_string(),
+            },
+            is_snippet: false,
+            sort_text: Some("7fffffff"),
+            sort_key: (3, "select_to_next_subword_end"),
+        },
+        SortableMatch {
+            string_match: StringMatch {
+                candidate_id: 0,
+                score: 0.06956521739130435,
+                positions: vec![],
+                string: "set_custom_context_menu".to_string(),
+            },
+            is_snippet: false,
+            sort_text: Some("7fffffff"),
+            sort_key: (3, "set_custom_context_menu"),
+        },
+        SortableMatch {
+            string_match: StringMatch {
+                candidate_id: 0,
+                score: 0.06,
+                positions: vec![],
+                string: "select_to_end_of_excerpt".to_string(),
+            },
+            is_snippet: false,
+            sort_text: Some("7fffffff"),
+            sort_key: (3, "select_to_end_of_excerpt"),
+        },
+        SortableMatch {
+            string_match: StringMatch {
+                candidate_id: 0,
+                score: 0.055384615384615386,
+                positions: vec![],
+                string: "select_to_start_of_excerpt".to_string(),
+            },
+            is_snippet: false,
+            sort_text: Some("7fffffff"),
+            sort_key: (3, "select_to_start_of_excerpt"),
+        },
+        SortableMatch {
+            string_match: StringMatch {
+                candidate_id: 0,
+                score: 0.0464516129032258,
+                positions: vec![],
+                string: "select_to_start_of_next_excerpt".to_string(),
+            },
+            is_snippet: false,
+            sort_text: Some("7fffffff"),
+            sort_key: (3, "select_to_start_of_next_excerpt"),
+        },
+        SortableMatch {
+            string_match: StringMatch {
+                candidate_id: 0,
+                score: 0.04363636363636363,
+                positions: vec![],
+                string: "select_to_end_of_previous_excerpt".to_string(),
+            },
+            is_snippet: false,
+            sort_text: Some("7fffffff"),
+            sort_key: (3, "select_to_end_of_previous_excerpt"),
+        },
+    ];
+    CompletionsMenu::sort_matches(&mut matches, query, SnippetSortOrder::Top);
+    assert_eq!(
+        matches
+            .iter()
+            .map(|m| m.string_match.string.as_str())
+            .collect::<Vec<&str>>(),
+        vec![
+            "set_text",
+            "set_context_menu_options",
+            "set_placeholder_text",
+            "set_text_style_refinement",
+            "select_to_end_of_excerpt",
+            "select_to_end_of_previous_excerpt",
+            "select_to_next_subword_end",
+            "select_to_next_word_end",
+            "select_to_start_of_excerpt",
+            "select_to_start_of_next_excerpt",
+            "set_custom_context_menu"
+        ]
     );
 }
