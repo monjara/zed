@@ -1084,7 +1084,7 @@ pub struct FoldId(usize);
 
 impl From<FoldId> for ElementId {
     fn from(val: FoldId) -> Self {
-        ElementId::Integer(val.0)
+        val.0.into()
     }
 }
 
