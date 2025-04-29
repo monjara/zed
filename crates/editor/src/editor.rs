@@ -288,7 +288,7 @@ impl InlayId {
     }
 }
 
-pub enum DebugCurrentRowHighlight {}
+pub enum ActiveDebugLine {}
 enum DocumentHighlightRead {}
 enum DocumentHighlightWrite {}
 enum InputComposition {}
@@ -1584,7 +1584,11 @@ impl Editor {
                     &project.read(cx).breakpoint_store(),
                     window,
                     |editor, _, event, window, cx| match event {
-                        BreakpointStoreEvent::ActiveDebugLineChanged => {
+                        BreakpointStoreEvent::ClearDebugLines => {
+                            editor.clear_row_highlights::<ActiveDebugLine>();
+                            editor.refresh_inline_values(cx);
+                        }
+                        BreakpointStoreEvent::SetDebugLine => {
                             if editor.go_to_active_debug_line(window, cx) {
                                 cx.stop_propagation();
                             }
@@ -16641,7 +16645,7 @@ impl Editor {
 
             let Some(active_stack_frame) = breakpoint_store.read(cx).active_position().cloned()
             else {
-                self.clear_row_highlights::<DebugCurrentRowHighlight>();
+                self.clear_row_highlights::<ActiveDebugLine>();
                 return None;
             };
 
@@ -16668,8 +16672,8 @@ impl Editor {
                 let multibuffer_anchor = snapshot.anchor_in_excerpt(id, position)?;
 
                 handled = true;
-                self.clear_row_highlights::<DebugCurrentRowHighlight>();
-                self.go_to_line::<DebugCurrentRowHighlight>(
+                self.clear_row_highlights::<ActiveDebugLine>();
+                self.go_to_line::<ActiveDebugLine>(
                     multibuffer_anchor,
                     Some(cx.theme().colors().editor_debugger_active_line_background),
                     window,
@@ -17717,7 +17721,7 @@ impl Editor {
 
         let current_execution_position = self
             .highlighted_rows
-            .get(&TypeId::of::<DebugCurrentRowHighlight>())
+            .get(&TypeId::of::<ActiveDebugLine>())
             .and_then(|lines| lines.last().map(|line| line.range.start));
 
         self.inline_value_cache.refresh_task = cx.spawn(async move |editor, cx| {
