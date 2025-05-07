@@ -27,7 +27,6 @@ use std::sync::Arc;
 use assistant_settings::AssistantSettings;
 use assistant_tool::ToolRegistry;
 use copy_path_tool::CopyPathTool;
-use feature_flags::{AgentStreamEditsFeatureFlag, FeatureFlagAppExt};
 use gpui::{App, Entity};
 use http_client::HttpClientWithUrl;
 use language_model::LanguageModelRegistry;
@@ -54,13 +53,14 @@ pub use edit_file_tool::{EditFileTool, EditFileToolInput};
 pub use find_path_tool::FindPathToolInput;
 pub use open_tool::OpenTool;
 pub use read_file_tool::ReadFileToolInput;
+pub use streaming_edit_file_tool::StreamingEditFileToolInput;
 pub use terminal_tool::TerminalTool;
 
 pub fn init(http_client: Arc<HttpClientWithUrl>, cx: &mut App) {
     assistant_tool::init(cx);
 
     let registry = ToolRegistry::global(cx);
-    registry.register_tool(TerminalTool);
+    registry.register_tool(TerminalTool::new(cx));
     registry.register_tool(CreateDirectoryTool);
     registry.register_tool(CopyPathTool);
     registry.register_tool(DeletePathTool);
@@ -76,8 +76,6 @@ pub fn init(http_client: Arc<HttpClientWithUrl>, cx: &mut App) {
     registry.register_tool(FetchTool::new(http_client));
 
     register_edit_file_tool(cx);
-    cx.observe_flag::<AgentStreamEditsFeatureFlag, _>(|_, cx| register_edit_file_tool(cx))
-        .detach();
     cx.observe_global::<SettingsStore>(register_edit_file_tool)
         .detach();
 

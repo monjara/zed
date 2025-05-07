@@ -1160,7 +1160,7 @@ impl Vim {
                 && !newest_selection_empty
                 && self.mode == Mode::Normal
                 // When following someone, don't switch vim mode.
-                && editor.leader_peer_id().is_none()
+                && editor.leader_id().is_none()
         {
             if preserve_selection {
                 self.switch_mode(Mode::Visual, true, window, cx);
@@ -1485,7 +1485,7 @@ impl Vim {
     fn local_selections_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(editor) = self.editor() else { return };
 
-        if editor.read(cx).leader_peer_id().is_some() {
+        if editor.read(cx).leader_id().is_some() {
             return;
         }
 
