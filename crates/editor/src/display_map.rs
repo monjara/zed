@@ -31,7 +31,7 @@ use crate::{
 };
 pub use block_map::{
     Block, BlockChunks as DisplayChunks, BlockContext, BlockId, BlockMap, BlockPlacement,
-    BlockPoint, BlockProperties, BlockRows, BlockStyle, CustomBlockId, RenderBlock,
+    BlockPoint, BlockProperties, BlockRows, BlockStyle, CustomBlockId, EditorMargins, RenderBlock,
     StickyHeaderExcerpt,
 };
 use block_map::{BlockRow, BlockSnapshot};
@@ -258,6 +258,7 @@ impl DisplayMap {
                         height: Some(height),
                         style,
                         priority,
+                        render_in_minimap: true,
                     }
                 }),
         );
@@ -950,16 +951,17 @@ impl DisplaySnapshot {
                 diagnostic_highlight.fade_out = Some(editor_style.unnecessary_code_fade);
             }
 
-            if let Some(severity) = chunk.diagnostic_severity {
-                // Omit underlines for HINT/INFO diagnostics on 'unnecessary' code.
-                if severity <= DiagnosticSeverity::WARNING || !chunk.is_unnecessary {
-                    let diagnostic_color = super::diagnostic_style(severity, &editor_style.status);
-                    diagnostic_highlight.underline = Some(UnderlineStyle {
-                        color: Some(diagnostic_color),
-                        thickness: 1.0.into(),
-                        wavy: true,
-                    });
-                }
+            // Omit underlines for HINT/INFO diagnostics on 'unnecessary' code.
+            if let Some(severity) = chunk.diagnostic_severity.filter(|severity| {
+                editor_style.show_underlines
+                    && (!chunk.is_unnecessary || *severity <= DiagnosticSeverity::WARNING)
+            }) {
+                let diagnostic_color = super::diagnostic_style(severity, &editor_style.status);
+                diagnostic_highlight.underline = Some(UnderlineStyle {
+                    color: Some(diagnostic_color),
+                    thickness: 1.0.into(),
+                    wavy: true,
+                });
             }
 
             if let Some(highlight_style) = highlight_style.as_mut() {
@@ -1617,6 +1619,7 @@ pub mod tests {
                                         height: Some(height),
                                         render: Arc::new(|_| div().into_any()),
                                         priority,
+                                        render_in_minimap: true,
                                     }
                                 })
                                 .collect::<Vec<_>>();
@@ -1979,6 +1982,7 @@ pub mod tests {
                     style: BlockStyle::Sticky,
                     render: Arc::new(|_| div().into_any()),
                     priority: 0,
+                    render_in_minimap: true,
                 }],
                 cx,
             );
@@ -2174,6 +2178,7 @@ pub mod tests {
                         style: BlockStyle::Sticky,
                         render: Arc::new(|_| div().into_any()),
                         priority: 0,
+                        render_in_minimap: true,
                     },
                     BlockProperties {
                         placement: BlockPlacement::Below(
@@ -2183,6 +2188,7 @@ pub mod tests {
                         style: BlockStyle::Sticky,
                         render: Arc::new(|_| div().into_any()),
                         priority: 0,
+                        render_in_minimap: true,
                     },
                 ],
                 cx,
@@ -2288,6 +2294,7 @@ pub mod tests {
                     style: BlockStyle::Sticky,
                     render: Arc::new(|_| div().into_any()),
                     priority: 0,
+                    render_in_minimap: true,
                 }],
                 cx,
             )
@@ -2362,6 +2369,7 @@ pub mod tests {
                     style: BlockStyle::Fixed,
                     render: Arc::new(|_| div().into_any()),
                     priority: 0,
+                    render_in_minimap: true,
                 }],
                 cx,
             );

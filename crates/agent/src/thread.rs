@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Result, anyhow};
-use assistant_settings::{AssistantSettings, CompletionMode};
+use assistant_settings::{AgentProfile, AgentProfileId, AssistantSettings, CompletionMode};
 use assistant_tool::{ActionLog, AnyToolCard, Tool, ToolWorkingSet};
 use chrono::{DateTime, Utc};
 use collections::HashMap;
@@ -359,6 +359,7 @@ pub struct Thread {
     >,
     remaining_turns: u32,
     configured_model: Option<ConfiguredModel>,
+    configured_profile: Option<AgentProfile>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -379,6 +380,9 @@ impl Thread {
     ) -> Self {
         let (detailed_summary_tx, detailed_summary_rx) = postage::watch::channel();
         let configured_model = LanguageModelRegistry::read_global(cx).default_model();
+        let assistant_settings = AssistantSettings::get_global(cx);
+        let profile_id = &assistant_settings.default_profile;
+        let configured_profile = assistant_settings.profiles.get(profile_id).cloned();
 
         Self {
             id: ThreadId::new(),
@@ -421,6 +425,7 @@ impl Thread {
             request_callback: None,
             remaining_turns: u32::MAX,
             configured_model,
+            configured_profile,
         }
     }
 
@@ -467,6 +472,13 @@ impl Thread {
         let completion_mode = serialized
             .completion_mode
             .unwrap_or_else(|| AssistantSettings::get_global(cx).preferred_completion_mode);
+
+        let configured_profile = serialized.profile.and_then(|profile| {
+            AssistantSettings::get_global(cx)
+                .profiles
+                .get(&profile)
+                .cloned()
+        });
 
         Self {
             id,
@@ -541,6 +553,7 @@ impl Thread {
             request_callback: None,
             remaining_turns: u32::MAX,
             configured_model,
+            configured_profile,
         }
     }
 
@@ -593,6 +606,19 @@ impl Thread {
 
     pub fn set_configured_model(&mut self, model: Option<ConfiguredModel>, cx: &mut Context<Self>) {
         self.configured_model = model;
+        cx.notify();
+    }
+
+    pub fn configured_profile(&self) -> Option<AgentProfile> {
+        self.configured_profile.clone()
+    }
+
+    pub fn set_configured_profile(
+        &mut self,
+        profile: Option<AgentProfile>,
+        cx: &mut Context<Self>,
+    ) {
+        self.configured_profile = profile;
         cx.notify();
     }
 
@@ -1100,6 +1126,10 @@ impl Thread {
                         provider: model.provider.id().0.to_string(),
                         model: model.model.id().0.to_string(),
                     }),
+                profile: this
+                    .configured_profile
+                    .as_ref()
+                    .map(|profile| AgentProfileId(profile.name.clone().into())),
                 completion_mode: Some(this.completion_mode),
             })
         })
@@ -1546,9 +1576,9 @@ impl Thread {
                                             completion.queue_state =  QueueState::Started;
                                         }
                                         CompletionRequestStatus::Failed {
-                                            code, message
+                                            code, message, request_id
                                         } => {
-                                            return Err(anyhow!("completion request failed. code: {code}, message: {message}"));
+                                            return Err(anyhow!("completion request failed. request_id: {request_id}, code: {code}, message: {message}"));
                                         }
                                         CompletionRequestStatus::UsageUpdated {
                                             amount, limit
@@ -1888,7 +1918,7 @@ impl Thread {
         model: Arc<dyn LanguageModel>,
     ) -> Vec<PendingToolUse> {
         self.auto_capture_telemetry(cx);
-        let request = self.to_completion_request(model, cx);
+        let request = self.to_completion_request(model.clone(), cx);
         let messages = Arc::new(request.messages);
         let pending_tool_uses = self
             .tool_use
@@ -1918,6 +1948,7 @@ impl Thread {
                         tool_use.input.clone(),
                         &messages,
                         tool,
+                        model.clone(),
                         window,
                         cx,
                     );
@@ -2012,10 +2043,19 @@ impl Thread {
         input: serde_json::Value,
         messages: &[LanguageModelRequestMessage],
         tool: Arc<dyn Tool>,
+        model: Arc<dyn LanguageModel>,
         window: Option<AnyWindowHandle>,
         cx: &mut Context<Thread>,
     ) {
-        let task = self.spawn_tool_use(tool_use_id.clone(), messages, input, tool, window, cx);
+        let task = self.spawn_tool_use(
+            tool_use_id.clone(),
+            messages,
+            input,
+            tool,
+            model,
+            window,
+            cx,
+        );
         self.tool_use
             .run_pending_tool(tool_use_id, ui_text.into(), task);
     }
@@ -2026,6 +2066,7 @@ impl Thread {
         messages: &[LanguageModelRequestMessage],
         input: serde_json::Value,
         tool: Arc<dyn Tool>,
+        model: Arc<dyn LanguageModel>,
         window: Option<AnyWindowHandle>,
         cx: &mut Context<Thread>,
     ) -> Task<()> {
@@ -2039,6 +2080,7 @@ impl Thread {
                 messages,
                 self.project.clone(),
                 self.action_log.clone(),
+                model,
                 window,
                 cx,
             )
