@@ -1,8 +1,10 @@
 use gpui::App;
 use language::CursorShape;
+use project::project_settings::DiagnosticSeverity;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsSources, VsCodeSettings};
+use util::serde::default_true;
 
 #[derive(Deserialize, Clone)]
 pub struct EditorSettings {
@@ -41,6 +43,8 @@ pub struct EditorSettings {
     pub jupyter: Jupyter,
     pub hide_mouse: Option<HideMouseMode>,
     pub snippet_sort_order: SnippetSortOrder,
+    #[serde(default)]
+    pub diagnostics_max_severity: Option<DiagnosticSeverity>,
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
@@ -128,6 +132,13 @@ pub struct Minimap {
 impl Minimap {
     pub fn minimap_enabled(&self) -> bool {
         self.show != ShowMinimap::Never
+    }
+
+    pub fn with_show_override(self) -> Self {
+        Self {
+            show: ShowMinimap::Always,
+            ..self
+        }
     }
 }
 
@@ -266,6 +277,9 @@ pub enum ScrollBeyondLastLine {
 /// Default options for buffer and project search items.
 #[derive(Copy, Clone, Default, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct SearchSettings {
+    /// Whether to show the project search button in the status bar.
+    #[serde(default = "default_true")]
+    pub button: bool,
     #[serde(default)]
     pub whole_word: bool,
     #[serde(default)]
@@ -318,6 +332,7 @@ pub enum SnippetSortOrder {
 }
 
 #[derive(Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct EditorSettingsContent {
     /// Whether the cursor blinks in the editor.
     ///
@@ -451,6 +466,19 @@ pub struct EditorSettingsContent {
 
     /// Jupyter REPL settings.
     pub jupyter: Option<JupyterContent>,
+
+    /// Which level to use to filter out diagnostics displayed in the editor.
+    ///
+    /// Affects the editor rendering only, and does not interrupt
+    /// the functionality of diagnostics fetching and project diagnostics editor.
+    /// Which files containing diagnostic errors/warnings to mark in the tabs.
+    /// Diagnostics are only shown when file icons are also active.
+    ///
+    /// Shows all diagnostics if not specified.
+    ///
+    /// Default: warning
+    #[serde(default)]
+    pub diagnostics_max_severity: Option<DiagnosticSeverity>,
 }
 
 // Toolbar related settings

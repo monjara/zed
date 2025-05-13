@@ -36,6 +36,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct ProjectSettings {
     /// Configuration for language servers.
     ///
@@ -104,7 +105,7 @@ pub struct NodeBinarySettings {
     pub npm_path: Option<String>,
     /// If enabled, Zed will download its own copy of Node.
     #[serde(default)]
-    pub ignore_system_version: Option<bool>,
+    pub ignore_system_version: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
@@ -119,11 +120,15 @@ pub enum DirenvSettings {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 pub struct DiagnosticsSettings {
-    /// Whether or not to include warning diagnostics
-    #[serde(default = "true_value")]
+    /// Whether to show the project diagnostics button in the status bar.
+    #[serde(default = "default_true")]
+    pub button: bool,
+
+    /// Whether or not to include warning diagnostics.
+    #[serde(default = "default_true")]
     pub include_warnings: bool,
 
-    /// Settings for showing inline diagnostics
+    /// Settings for showing inline diagnostics.
     #[serde(default)]
     pub inline: InlineDiagnosticsSettings,
 
@@ -181,13 +186,29 @@ pub struct CargoDiagnosticsSettings {
     pub fetch_cargo_diagnostics: bool,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticSeverity {
+    // No diagnostics are shown.
+    Off,
     Error,
     Warning,
     Info,
     Hint,
+}
+
+impl DiagnosticSeverity {
+    pub fn into_lsp(self) -> Option<lsp::DiagnosticSeverity> {
+        match self {
+            DiagnosticSeverity::Off => None,
+            DiagnosticSeverity::Error => Some(lsp::DiagnosticSeverity::ERROR),
+            DiagnosticSeverity::Warning => Some(lsp::DiagnosticSeverity::WARNING),
+            DiagnosticSeverity::Info => Some(lsp::DiagnosticSeverity::INFORMATION),
+            DiagnosticSeverity::Hint => Some(lsp::DiagnosticSeverity::HINT),
+        }
+    }
 }
 
 impl Default for InlineDiagnosticsSettings {
@@ -288,7 +309,7 @@ pub struct InlineBlameSettings {
     /// the currently focused line.
     ///
     /// Default: true
-    #[serde(default = "true_value")]
+    #[serde(default = "default_true")]
     pub enabled: bool,
     /// Whether to only show the inline blame information
     /// after a delay once the cursor stops moving.
@@ -304,10 +325,6 @@ pub struct InlineBlameSettings {
     /// Default: false
     #[serde(default)]
     pub show_commit_summary: bool,
-}
-
-const fn true_value() -> bool {
-    true
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]

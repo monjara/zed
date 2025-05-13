@@ -41,6 +41,7 @@ pub enum NotifyWhenAgentWaiting {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(tag = "name", rename_all = "snake_case")]
+#[schemars(deny_unknown_fields)]
 pub enum AssistantProviderContentV1 {
     #[serde(rename = "zed.dev")]
     ZedDotDev { default_model: Option<CloudModel> },
@@ -85,7 +86,6 @@ pub struct AssistantSettings {
     pub thread_summary_model: Option<LanguageModelSelection>,
     pub inline_alternatives: Vec<LanguageModelSelection>,
     pub using_outdated_settings_version: bool,
-    pub enable_experimental_live_diffs: bool,
     pub default_profile: AgentProfileId,
     pub profiles: IndexMap<AgentProfileId, AgentProfile>,
     pub always_allow_tool_actions: bool,
@@ -104,10 +104,6 @@ impl AssistantSettings {
             .iter()
             .rfind(|setting| setting.matches(model))
             .and_then(|m| m.temperature)
-    }
-
-    pub fn are_live_diffs_enabled(&self, _cx: &App) -> bool {
-        false
     }
 
     pub fn set_inline_assistant_model(&mut self, provider: String, model: String) {
@@ -257,7 +253,6 @@ impl AssistantSettingsContent {
                     commit_message_model: None,
                     thread_summary_model: None,
                     inline_alternatives: None,
-                    enable_experimental_live_diffs: None,
                     default_profile: None,
                     profiles: None,
                     always_allow_tool_actions: None,
@@ -288,7 +283,6 @@ impl AssistantSettingsContent {
                 commit_message_model: None,
                 thread_summary_model: None,
                 inline_alternatives: None,
-                enable_experimental_live_diffs: None,
                 default_profile: None,
                 profiles: None,
                 always_allow_tool_actions: None,
@@ -550,6 +544,7 @@ impl AssistantSettingsContent {
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema, Debug)]
 #[serde(tag = "version")]
+#[schemars(deny_unknown_fields)]
 pub enum VersionedAssistantSettingsContent {
     #[serde(rename = "1")]
     V1(AssistantSettingsContentV1),
@@ -570,7 +565,6 @@ impl Default for VersionedAssistantSettingsContent {
             commit_message_model: None,
             thread_summary_model: None,
             inline_alternatives: None,
-            enable_experimental_live_diffs: None,
             default_profile: None,
             profiles: None,
             always_allow_tool_actions: None,
@@ -584,6 +578,7 @@ impl Default for VersionedAssistantSettingsContent {
 }
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema, Debug, Default)]
+#[schemars(deny_unknown_fields)]
 pub struct AssistantSettingsContentV2 {
     /// Whether the Assistant is enabled.
     ///
@@ -615,10 +610,6 @@ pub struct AssistantSettingsContentV2 {
     thread_summary_model: Option<LanguageModelSelection>,
     /// Additional models with which to generate alternatives when performing inline assists.
     inline_alternatives: Option<Vec<LanguageModelSelection>>,
-    /// Enable experimental live diffs in the assistant panel.
-    ///
-    /// Default: false
-    enable_experimental_live_diffs: Option<bool>,
     /// The default profile to use in the Agent.
     ///
     /// Default: write
@@ -746,6 +737,7 @@ pub struct ContextServerPresetContent {
 }
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema, Debug)]
+#[schemars(deny_unknown_fields)]
 pub struct AssistantSettingsContentV1 {
     /// Whether the Assistant is enabled.
     ///
@@ -775,6 +767,7 @@ pub struct AssistantSettingsContentV1 {
 }
 
 #[derive(Clone, Serialize, Deserialize, JsonSchema, Debug)]
+#[schemars(deny_unknown_fields)]
 pub struct LegacyAssistantSettingsContent {
     /// Whether to show the assistant panel button in the status bar.
     ///
@@ -845,10 +838,6 @@ impl Settings for AssistantSettings {
                 .thread_summary_model
                 .or(settings.thread_summary_model.take());
             merge(&mut settings.inline_alternatives, value.inline_alternatives);
-            merge(
-                &mut settings.enable_experimental_live_diffs,
-                value.enable_experimental_live_diffs,
-            );
             merge(
                 &mut settings.always_allow_tool_actions,
                 value.always_allow_tool_actions,
@@ -994,7 +983,6 @@ mod tests {
                                 dock: None,
                                 default_width: None,
                                 default_height: None,
-                                enable_experimental_live_diffs: None,
                                 default_profile: None,
                                 profiles: None,
                                 always_allow_tool_actions: None,

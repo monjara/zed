@@ -817,7 +817,7 @@ mod tests {
     };
     use gpui::{AppContext as _, font, px};
     use language::Capability;
-    use project::Project;
+    use project::{Project, project_settings::DiagnosticSeverity};
     use settings::SettingsStore;
     use util::post_inc;
 
@@ -941,6 +941,7 @@ mod tests {
                 1,
                 1,
                 FoldPlaceholder::test(),
+                DiagnosticSeverity::Warning,
                 cx,
             )
         });
@@ -1150,6 +1151,7 @@ mod tests {
                     0,
                     1,
                     FoldPlaceholder::test(),
+                    DiagnosticSeverity::Warning,
                     cx,
                 )
             });
