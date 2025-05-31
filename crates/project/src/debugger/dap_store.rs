@@ -103,6 +103,8 @@ impl DapStore {
         ADD_LOCATORS.call_once(|| {
             let registry = DapRegistry::global(cx);
             registry.add_locator(Arc::new(locators::cargo::CargoLocator {}));
+            registry.add_locator(Arc::new(locators::go::GoLocator {}));
+            registry.add_locator(Arc::new(locators::node::NodeLocator));
             registry.add_locator(Arc::new(locators::python::PythonLocator));
         });
         client.add_entity_request_handler(Self::handle_run_debug_locator);
