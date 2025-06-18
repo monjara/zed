@@ -25,7 +25,7 @@ Here's an overview of the supported providers and tool call support:
 
 ## Use Your Own Keys {#use-your-own-keys}
 
-While Zed offers hosted versions of models through [our various plans](/ai/plans-and-usage), we're always happy to support users wanting to supply their own API keys.
+While Zed offers hosted versions of models through [our various plans](./plans-and-usage.md), we're always happy to support users wanting to supply their own API keys.
 Below, you can learn how to do that for each provider.
 
 > Using your own API keys is _free_—you do not need to subscribe to a Zed plan to use our AI features with your own keys.
@@ -215,6 +215,8 @@ You can use GitHub Copilot Chat with the Zed assistant by choosing it via the mo
 2. Click on `Sign in to use GitHub Copilot`, follow the steps shown in the modal.
 
 Alternatively, you can provide an OAuth token via the `GH_COPILOT_TOKEN` environment variable.
+
+> **Note**: If you don't see specific models in the dropdown, you may need to enable them in your [GitHub Copilot settings](https://github.com/settings/copilot/features).
 
 ### Google AI {#google-ai}
 
