@@ -5,7 +5,7 @@ use editor::{
 };
 use gpui::{
     Action, AppContext, Context, Entity, HighlightStyle, Hsla, KeystrokeEvent, Render, WeakEntity,
-    Window, actions, impl_actions,
+    Window, actions,
 };
 use schemars::JsonSchema;
 use search::{enumerate_points_by_text, enumerate_word_beginnings, sort_matches_display};
@@ -31,15 +31,15 @@ pub(crate) enum Direction {
     Backwards,
 }
 
-#[derive(Clone, Deserialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Deserialize, PartialEq, JsonSchema, Action)]
+#[action(namespace = easy_motion)]
+#[serde(deny_unknown_fields)]
 struct Word(Direction);
 
-#[derive(Clone, Deserialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Deserialize, PartialEq, JsonSchema, Action)]
+#[action(namespace = easy_motion)]
+#[serde(deny_unknown_fields)]
 struct NChar(u8);
-
-impl_actions!(easy_motion, [Word, NChar]);
 
 actions!(easy_motion, [Cancel]);
 
