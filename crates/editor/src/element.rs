@@ -16,9 +16,9 @@ use crate::{
         HighlightedChunk, ToDisplayPoint,
     },
     editor_settings::{
-        CurrentLineHighlight, DocumentColorsRenderMode, DoubleClickInMultibuffer, MinimapThumb,
-        MinimapThumbBorder, ScrollBeyondLastLine, ScrollbarAxes, ScrollbarDiagnostics, ShowMinimap,
-        ShowScrollbar,
+        CurrentLineHighlight, DocumentColorsRenderMode, DoubleClickInMultibuffer, Minimap,
+        MinimapThumb, MinimapThumbBorder, ScrollBeyondLastLine, ScrollbarAxes,
+        ScrollbarDiagnostics, ShowMinimap, ShowScrollbar,
     },
     git::blame::{BlameRenderer, GitBlame, GlobalBlameRenderer},
     hover_popover::{
@@ -1948,6 +1948,40 @@ impl EditorElement {
         let mut text_style = self.style.text.clone();
         text_style.font_size = font_size;
         text_style.line_height_in_pixels(rem_size)
+    }
+
+    fn get_minimap_width(
+        &self,
+        minimap_settings: &Minimap,
+        scrollbars_shown: bool,
+        text_width: Pixels,
+        em_width: Pixels,
+        font_size: Pixels,
+        rem_size: Pixels,
+        cx: &App,
+    ) -> Option<Pixels> {
+        if minimap_settings.show == ShowMinimap::Auto && !scrollbars_shown {
+            return None;
+        }
+
+        let minimap_font_size = self.editor.read_with(cx, |editor, cx| {
+            editor.minimap().map(|minimap_editor| {
+                minimap_editor
+                    .read(cx)
+                    .text_style_refinement
+                    .as_ref()
+                    .and_then(|refinement| refinement.font_size)
+                    .unwrap_or(MINIMAP_FONT_SIZE)
+            })
+        })?;
+
+        let minimap_em_width = em_width * (minimap_font_size.to_pixels(rem_size) / font_size);
+
+        let minimap_width = (text_width * MinimapLayout::MINIMAP_WIDTH_PCT)
+            .min(minimap_em_width * minimap_settings.max_width_columns.get() as f32);
+
+        (minimap_width >= minimap_em_width * MinimapLayout::MINIMAP_MIN_WIDTH_COLUMNS)
+            .then_some(minimap_width)
     }
 
     fn prepaint_crease_toggles(
@@ -7871,9 +7905,10 @@ impl Element for EditorElement {
                     });
                     let style = self.style.clone();
 
+                    let rem_size = window.rem_size();
                     let font_id = window.text_system().resolve_font(&style.text.font());
-                    let font_size = style.text.font_size.to_pixels(window.rem_size());
-                    let line_height = style.text.line_height_in_pixels(window.rem_size());
+                    let font_size = style.text.font_size.to_pixels(rem_size);
+                    let line_height = style.text.line_height_in_pixels(rem_size);
                     let em_width = window.text_system().em_width(font_id, font_size).unwrap();
                     let em_advance = window.text_system().em_advance(font_id, font_size).unwrap();
                     let glyph_grid_cell = size(em_advance, line_height);
@@ -7901,27 +7936,21 @@ impl Element for EditorElement {
                         .then_some(style.scrollbar_width)
                         .unwrap_or_default();
                     let minimap_width = self
-                        .editor
-                        .read(cx)
-                        .minimap()
-                        .is_some()
-                        .then(|| match settings.minimap.show {
-                            ShowMinimap::Auto => {
-                                scrollbars_shown.then_some(MinimapLayout::MINIMAP_WIDTH)
-                            }
-                            _ => Some(MinimapLayout::MINIMAP_WIDTH),
-                        })
-                        .flatten()
-                        .filter(|minimap_width| {
-                            text_width - vertical_scrollbar_width - *minimap_width > *minimap_width
-                        })
+                        .get_minimap_width(
+                            &settings.minimap,
+                            scrollbars_shown,
+                            text_width,
+                            em_width,
+                            font_size,
+                            rem_size,
+                            cx,
+                        )
                         .unwrap_or_default();
 
                     let right_margin = minimap_width + vertical_scrollbar_width;
 
                     let editor_width =
                         text_width - gutter_dimensions.margin - 2 * em_width - right_margin;
-
                     let editor_margins = EditorMargins {
                         gutter: gutter_dimensions,
                         right: right_margin,
@@ -8548,26 +8577,37 @@ impl Element for EditorElement {
                             );
 
                             let line_ix = display_row.minus(start_row) as usize;
-                            let row_info = &row_infos[line_ix];
-                            let line_layout = &line_layouts[line_ix];
-                            let crease_trailer_layout = crease_trailers[line_ix].as_ref();
-
-                            if let Some(layout) = self.layout_inline_blame(
-                                display_row,
-                                row_info,
-                                line_layout,
-                                crease_trailer_layout,
-                                em_width,
-                                content_origin,
-                                scroll_pixel_position,
-                                line_height,
-                                &text_hitbox,
-                                window,
-                                cx,
+                            if let (Some(row_info), Some(line_layout), Some(crease_trailer)) = (
+                                row_infos.get(line_ix),
+                                line_layouts.get(line_ix),
+                                crease_trailers.get(line_ix),
                             ) {
-                                inline_blame_layout = Some(layout);
-                                // Blame overrides inline diagnostics
-                                inline_diagnostics.remove(&display_row);
+                                let crease_trailer_layout = crease_trailer.as_ref();
+                                if let Some(layout) = self.layout_inline_blame(
+                                    display_row,
+                                    row_info,
+                                    line_layout,
+                                    crease_trailer_layout,
+                                    em_width,
+                                    content_origin,
+                                    scroll_pixel_position,
+                                    line_height,
+                                    &text_hitbox,
+                                    window,
+                                    cx,
+                                ) {
+                                    inline_blame_layout = Some(layout);
+                                    // Blame overrides inline diagnostics
+                                    inline_diagnostics.remove(&display_row);
+                                }
+                            } else {
+                                log::error!(
+                                    "bug: line_ix {} is out of bounds - row_infos.len(): {}, line_layouts.len(): {}, crease_trailers.len(): {}",
+                                    line_ix,
+                                    row_infos.len(),
+                                    line_layouts.len(),
+                                    crease_trailers.len(),
+                                );
                             }
                         }
                     }
@@ -9522,7 +9562,10 @@ struct MinimapLayout {
 }
 
 impl MinimapLayout {
-    const MINIMAP_WIDTH: Pixels = px(100.);
+    /// The minimum width of the minimap in columns. If the minimap is smaller than this, it will be hidden.
+    const MINIMAP_MIN_WIDTH_COLUMNS: f32 = 20.;
+    /// The minimap width as a percentage of the editor width.
+    const MINIMAP_WIDTH_PCT: f32 = 0.15;
     /// Calculates the scroll top offset the minimap editor has to have based on the
     /// current scroll progress.
     fn calculate_minimap_top_offset(
@@ -10001,7 +10044,7 @@ pub fn register_action<T: Action>(
 fn compute_auto_height_layout(
     editor: &mut Editor,
     min_lines: usize,
-    max_lines: usize,
+    max_lines: Option<usize>,
     max_line_number_width: Pixels,
     known_dimensions: Size<Option<Pixels>>,
     available_width: AvailableSpace,
@@ -10047,11 +10090,18 @@ fn compute_auto_height_layout(
     }
 
     let scroll_height = (snapshot.max_point().row().next_row().0 as f32) * line_height;
-    let height = scroll_height
-        .max(line_height * min_lines as f32)
-        .min(line_height * max_lines as f32);
 
-    Some(size(width, height))
+    let min_height = line_height * min_lines as f32;
+    let content_height = scroll_height.max(min_height);
+
+    let final_height = if let Some(max_lines) = max_lines {
+        let max_height = line_height * max_lines as f32;
+        content_height.min(max_height)
+    } else {
+        content_height
+    };
+
+    Some(size(width, final_height))
 }
 
 #[cfg(test)]
@@ -10353,7 +10403,7 @@ mod tests {
             EditorMode::SingleLine { auto_width: false },
             EditorMode::AutoHeight {
                 min_lines: 1,
-                max_lines: 100,
+                max_lines: Some(100),
             },
         ] {
             for show_line_numbers in [true, false] {

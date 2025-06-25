@@ -19,7 +19,7 @@ use dap::{DapRegistry, StartDebuggingRequestArguments};
 use gpui::{
     Action, App, AsyncWindowContext, ClipboardItem, Context, DismissEvent, Entity, EntityId,
     EventEmitter, FocusHandle, Focusable, MouseButton, MouseDownEvent, Point, Subscription, Task,
-    WeakEntity, actions, anchored, deferred,
+    WeakEntity, anchored, deferred,
 };
 
 use itertools::Itertools as _;
@@ -39,6 +39,7 @@ use workspace::{
     Pane, Workspace,
     dock::{DockPosition, Panel, PanelEvent},
 };
+use zed_actions::ToggleFocus;
 
 pub enum DebugPanelEvent {
     Exited(SessionId),
@@ -56,8 +57,6 @@ pub enum DebugPanelEvent {
     ClientShutdown(SessionId),
     CapabilitiesChanged(SessionId),
 }
-
-actions!(debug_panel, [ToggleFocus]);
 
 pub struct DebugPanel {
     size: Pixels,
@@ -1142,7 +1141,9 @@ async fn register_session_inner(
         let debug_session = DebugSession::running(
             this.project.clone(),
             this.workspace.clone(),
-            parent_session.map(|p| p.read(cx).running_state().read(cx).debug_terminal.clone()),
+            parent_session
+                .as_ref()
+                .map(|p| p.read(cx).running_state().read(cx).debug_terminal.clone()),
             session,
             serialized_layout,
             this.position(window, cx).axis(),
@@ -1157,8 +1158,14 @@ async fn register_session_inner(
             |_, _, cx| cx.notify(),
         )
         .detach();
-
-        this.sessions.push(debug_session.clone());
+        let insert_position = this
+            .sessions
+            .iter()
+            .position(|session| Some(session) == parent_session.as_ref())
+            .map(|position| position + 1)
+            .unwrap_or(this.sessions.len());
+        // Maintain topological sort order of sessions
+        this.sessions.insert(insert_position, debug_session.clone());
 
         debug_session
     })?;
@@ -1465,8 +1472,10 @@ impl Render for DebugPanel {
                                 h_flex().size_full()
                                     .items_start()
 
-                                    .child(v_flex().items_start().min_w_1_3().h_full().p_1()
-                                        .child(h_flex().px_1().child(Label::new("Breakpoints").size(LabelSize::Small)))
+                                    .child(v_flex().group("base-breakpoint-list").items_start().min_w_1_3().h_full().p_1()
+                                        .child(h_flex().pl_1().w_full().justify_between()
+                                            .child(Label::new("Breakpoints").size(LabelSize::Small))
+                                            .child(h_flex().visible_on_hover("base-breakpoint-list").child(self.breakpoint_list.read(cx).render_control_strip())))
                                         .child(Divider::horizontal())
                                         .child(self.breakpoint_list.clone()))
                                     .child(Divider::vertical())
