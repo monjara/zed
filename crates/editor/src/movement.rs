@@ -3,11 +3,9 @@
 
 use super::{Bias, DisplayPoint, DisplaySnapshot, SelectionGoal, ToDisplayPoint};
 use crate::{
-    CharKind, DisplayRow, DisplayRow, EditorStyle, EditorStyle, ToOffset, ToOffset, ToPoint,
-    ToPoint,
+    DisplayRow, EditorStyle, ToOffset, ToPoint,
     display_map::FoldPoint,
     fold_map::{FoldOffset, FoldSnapshot},
-    scroll::ScrollAnchor,
     scroll::ScrollAnchor,
 };
 use gpui::{Pixels, WindowTextSystem};

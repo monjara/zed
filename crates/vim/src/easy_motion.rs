@@ -1,7 +1,7 @@
 use easy_motion_state::{EasyMotionState, OverlayState};
 use editor::{
-    Addon, DisplayPoint, Editor, EditorEvent, MultiBufferSnapshot, ToPoint,
-    display_map::DisplaySnapshot, overlay::Overlay, scroll::Autoscroll,
+    Addon, DisplayPoint, Editor, EditorEvent, MultiBufferSnapshot, SelectionEffects, ToPoint,
+    display_map::DisplaySnapshot, overlay::Overlay,
 };
 use gpui::{
     Action, AppContext, Context, Entity, HighlightStyle, Hsla, KeystrokeEvent, Render, WeakEntity,
@@ -330,7 +330,7 @@ impl EasyMotion {
                 let point = snapshot
                     .display_snapshot
                     .point_to_display_point(point, Bias::Right);
-                editor.change_selections(Some(Autoscroll::fit()), window, cx, |selection| {
+                editor.change_selections(SelectionEffects::default(), window, cx, |selection| {
                     selection.move_cursors_with(|_, _, _| (point, SelectionGoal::None))
                 });
                 Self::clear_editor(editor, cx);
