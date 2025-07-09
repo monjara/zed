@@ -87,7 +87,6 @@ use util::{RangeExt, ResultExt, debug_panic};
 use workspace::{CollaboratorId, Workspace, item::Item, notifications::NotifyTaskExt};
 
 const INLINE_BLAME_PADDING_EM_WIDTHS: f32 = 7.;
-const SELECTION_DRAG_DELAY: Duration = Duration::from_millis(300);
 
 /// Determines what kinds of highlights should be applied to a lines background.
 #[derive(Clone, Copy, Default)]
@@ -644,7 +643,11 @@ impl EditorElement {
             return;
         }
 
-        if editor.drag_and_drop_selection_enabled && click_count == 1 {
+        if EditorSettings::get_global(cx)
+            .drag_and_drop_selection
+            .enabled
+            && click_count == 1
+        {
             let newest_anchor = editor.selections.newest_anchor();
             let snapshot = editor.snapshot(window, cx);
             let selection = newest_anchor.map(|anchor| anchor.to_display_point(&snapshot));
@@ -1022,7 +1025,10 @@ impl EditorElement {
                     ref click_position,
                     ref mouse_down_time,
                 } => {
-                    if mouse_down_time.elapsed() >= SELECTION_DRAG_DELAY {
+                    let drag_and_drop_delay = Duration::from_millis(
+                        EditorSettings::get_global(cx).drag_and_drop_selection.delay,
+                    );
+                    if mouse_down_time.elapsed() >= drag_and_drop_delay {
                         let drop_cursor = Selection {
                             id: post_inc(&mut editor.selections.next_selection_id),
                             start: drop_anchor,
@@ -1611,6 +1617,7 @@ impl EditorElement {
                                         strikethrough: None,
                                         underline: None,
                                     }],
+                                    None,
                                 )
                             })
                     } else {
@@ -3305,10 +3312,12 @@ impl EditorElement {
                         underline: None,
                         strikethrough: None,
                     };
-                    let line =
-                        window
-                            .text_system()
-                            .shape_line(line.to_string().into(), font_size, &[run]);
+                    let line = window.text_system().shape_line(
+                        line.to_string().into(),
+                        font_size,
+                        &[run],
+                        None,
+                    );
                     LineWithInvisibles {
                         width: line.width,
                         len: line.len,
@@ -5749,6 +5758,19 @@ impl EditorElement {
                 let editor = self.editor.read(cx);
                 if editor.mouse_cursor_hidden {
                     window.set_window_cursor_style(CursorStyle::None);
+                } else if let SelectionDragState::ReadyToDrag {
+                    mouse_down_time, ..
+                } = &editor.selection_drag_state
+                {
+                    let drag_and_drop_delay = Duration::from_millis(
+                        EditorSettings::get_global(cx).drag_and_drop_selection.delay,
+                    );
+                    if mouse_down_time.elapsed() >= drag_and_drop_delay {
+                        window.set_cursor_style(
+                            CursorStyle::DragCopy,
+                            &layout.position_map.text_hitbox,
+                        );
+                    }
                 } else if matches!(
                     editor.selection_drag_state,
                     SelectionDragState::Dragging { .. }
@@ -6930,6 +6952,7 @@ impl EditorElement {
                 underline: None,
                 strikethrough: None,
             }],
+            None,
         );
 
         layout.width
@@ -6958,6 +6981,7 @@ impl EditorElement {
             text,
             self.style.text.font_size.to_pixels(window.rem_size()),
             &[run],
+            None,
         )
     }
 
@@ -7226,10 +7250,12 @@ impl LineWithInvisibles {
         }]) {
             if let Some(replacement) = highlighted_chunk.replacement {
                 if !line.is_empty() {
-                    let shaped_line =
-                        window
-                            .text_system()
-                            .shape_line(line.clone().into(), font_size, &styles);
+                    let shaped_line = window.text_system().shape_line(
+                        line.clone().into(),
+                        font_size,
+                        &styles,
+                        None,
+                    );
                     width += shaped_line.width;
                     len += shaped_line.len;
                     fragments.push(LineFragment::Text(shaped_line));
@@ -7249,6 +7275,7 @@ impl LineWithInvisibles {
                                 chunk,
                                 font_size,
                                 &[text_style.to_run(highlighted_chunk.text.len())],
+                                None,
                             );
                             AvailableSpace::Definite(shaped_line.width)
                         } else {
@@ -7293,7 +7320,7 @@ impl LineWithInvisibles {
                         };
                         let line_layout = window
                             .text_system()
-                            .shape_line(x, font_size, &[run])
+                            .shape_line(x, font_size, &[run], None)
                             .with_len(highlighted_chunk.text.len());
 
                         width += line_layout.width;
@@ -7308,6 +7335,7 @@ impl LineWithInvisibles {
                             line.clone().into(),
                             font_size,
                             &styles,
+                            None,
                         );
                         width += shaped_line.width;
                         len += shaped_line.len;
@@ -7977,6 +8005,7 @@ impl Element for EditorElement {
                         editor.last_bounds = Some(bounds);
                         editor.gutter_dimensions = gutter_dimensions;
                         editor.set_visible_line_count(bounds.size.height / line_height, window, cx);
+                        editor.set_visible_column_count(editor_content_width / em_advance);
 
                         if matches!(
                             editor.mode,
@@ -8482,6 +8511,7 @@ impl Element for EditorElement {
                                 scroll_width,
                                 em_advance,
                                 &line_layouts,
+                                window,
                                 cx,
                             )
                         } else {
@@ -8636,6 +8666,7 @@ impl Element for EditorElement {
                                 scroll_width,
                                 em_advance,
                                 &line_layouts,
+                                window,
                                 cx,
                             )
                         } else {
@@ -8884,6 +8915,7 @@ impl Element for EditorElement {
                             underline: None,
                             strikethrough: None,
                         }],
+                        None
                     );
                     let space_invisible = window.text_system().shape_line(
                         "•".into(),
@@ -8896,6 +8928,7 @@ impl Element for EditorElement {
                             underline: None,
                             strikethrough: None,
                         }],
+                        None
                     );
 
                     let mode = snapshot.mode.clone();
