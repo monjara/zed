@@ -6,6 +6,7 @@ version = 4
 name = "acp_thread"
 version = "0.1.0"
 dependencies = [
+ "agent-client-protocol",
  "agentic-coding-protocol",
  "anyhow",
  "assistant_tool",
@@ -136,10 +137,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-client-protocol"
+version = "0.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fb7f39671e02f8a1aeb625652feae40b6fc2597baaa97e028a98863477aecbd"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "agent_servers"
 version = "0.1.0"
 dependencies = [
  "acp_thread",
+ "agent-client-protocol",
  "agentic-coding-protocol",
  "anyhow",
  "collections",
@@ -195,9 +208,9 @@ version = "0.1.0"
 dependencies = [
  "acp_thread",
  "agent",
+ "agent-client-protocol",
  "agent_servers",
  "agent_settings",
- "agentic-coding-protocol",
  "ai_onboarding",
  "anyhow",
  "assistant_context",
@@ -347,6 +360,7 @@ dependencies = [
  "proto",
  "serde",
  "smallvec",
+ "telemetry",
  "ui",
  "workspace-hack",
  "zed_actions",
@@ -4965,6 +4979,7 @@ dependencies = [
  "text",
  "theme",
  "time",
+ "tree-sitter-bash",
  "tree-sitter-html",
  "tree-sitter-python",
  "tree-sitter-rust",
@@ -7401,9 +7416,9 @@ dependencies = [
 
 [[package]]
 name = "grid"
-version = "0.14.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be136d9dacc2a13cc70bb6c8f902b414fb2641f8db1314637c6b7933411a8f82"
+checksum = "71b01d27060ad58be4663b9e4ac9e2d4806918e8876af8912afbddd1a91d5eaa"
 
 [[package]]
 name = "group"
@@ -7673,6 +7688,12 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "hex-literal"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bcaaec4551594c969335c98c903c1397853d4198408ea609190f420500f6be71"
 
 [[package]]
 name = "hexf-parse"
@@ -9018,6 +9039,7 @@ dependencies = [
  "task",
  "text",
  "theme",
+ "toml 0.8.20",
  "tree-sitter",
  "tree-sitter-elixir",
  "tree-sitter-embedded-template",
@@ -9393,7 +9415,7 @@ dependencies = [
 [[package]]
 name = "libwebrtc"
 version = "0.3.10"
-source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=d2eade7a6b15d6dbdb38ba12a1ff7bf07fcebba4#d2eade7a6b15d6dbdb38ba12a1ff7bf07fcebba4"
+source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=383e5377f8b7de1f8627ee16f0cf11c5293337bd#383e5377f8b7de1f8627ee16f0cf11c5293337bd"
 dependencies = [
  "cxx",
  "jni",
@@ -9473,7 +9495,7 @@ checksum = "23fb14cb19457329c82206317a5663005a4d404783dc74f4252769b0d5f42856"
 [[package]]
 name = "livekit"
 version = "0.7.8"
-source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=d2eade7a6b15d6dbdb38ba12a1ff7bf07fcebba4#d2eade7a6b15d6dbdb38ba12a1ff7bf07fcebba4"
+source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=383e5377f8b7de1f8627ee16f0cf11c5293337bd#383e5377f8b7de1f8627ee16f0cf11c5293337bd"
 dependencies = [
  "chrono",
  "futures-util",
@@ -9496,7 +9518,7 @@ dependencies = [
 [[package]]
 name = "livekit-api"
 version = "0.4.2"
-source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=d2eade7a6b15d6dbdb38ba12a1ff7bf07fcebba4#d2eade7a6b15d6dbdb38ba12a1ff7bf07fcebba4"
+source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=383e5377f8b7de1f8627ee16f0cf11c5293337bd#383e5377f8b7de1f8627ee16f0cf11c5293337bd"
 dependencies = [
  "futures-util",
  "http 0.2.12",
@@ -9520,7 +9542,7 @@ dependencies = [
 [[package]]
 name = "livekit-protocol"
 version = "0.3.9"
-source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=d2eade7a6b15d6dbdb38ba12a1ff7bf07fcebba4#d2eade7a6b15d6dbdb38ba12a1ff7bf07fcebba4"
+source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=383e5377f8b7de1f8627ee16f0cf11c5293337bd#383e5377f8b7de1f8627ee16f0cf11c5293337bd"
 dependencies = [
  "futures-util",
  "livekit-runtime",
@@ -9537,7 +9559,7 @@ dependencies = [
 [[package]]
 name = "livekit-runtime"
 version = "0.4.0"
-source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=d2eade7a6b15d6dbdb38ba12a1ff7bf07fcebba4#d2eade7a6b15d6dbdb38ba12a1ff7bf07fcebba4"
+source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=383e5377f8b7de1f8627ee16f0cf11c5293337bd#383e5377f8b7de1f8627ee16f0cf11c5293337bd"
 dependencies = [
  "tokio",
  "tokio-stream",
@@ -14778,6 +14800,7 @@ dependencies = [
  "fs",
  "fuzzy",
  "gpui",
+ "itertools 0.14.0",
  "language",
  "log",
  "menu",
@@ -15958,13 +15981,12 @@ dependencies = [
 
 [[package]]
 name = "taffy"
-version = "0.5.1"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8b61630cba2afd2c851821add2e1bb1b7851a2436e839ab73b56558b009035e"
+checksum = "7aaef0ac998e6527d6d0d5582f7e43953bb17221ac75bb8eb2fcc2db3396db1c"
 dependencies = [
  "arrayvec",
  "grid",
- "num-traits",
  "serde",
  "slotmap",
 ]
@@ -18524,7 +18546,7 @@ dependencies = [
 [[package]]
 name = "webrtc-sys"
 version = "0.3.7"
-source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=d2eade7a6b15d6dbdb38ba12a1ff7bf07fcebba4#d2eade7a6b15d6dbdb38ba12a1ff7bf07fcebba4"
+source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=383e5377f8b7de1f8627ee16f0cf11c5293337bd#383e5377f8b7de1f8627ee16f0cf11c5293337bd"
 dependencies = [
  "cc",
  "cxx",
@@ -18537,13 +18559,15 @@ dependencies = [
 [[package]]
 name = "webrtc-sys-build"
 version = "0.3.6"
-source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=d2eade7a6b15d6dbdb38ba12a1ff7bf07fcebba4#d2eade7a6b15d6dbdb38ba12a1ff7bf07fcebba4"
+source = "git+https://github.com/zed-industries/livekit-rust-sdks?rev=383e5377f8b7de1f8627ee16f0cf11c5293337bd#383e5377f8b7de1f8627ee16f0cf11c5293337bd"
 dependencies = [
  "fs2",
+ "hex-literal",
  "regex",
  "reqwest 0.11.27",
  "scratch",
  "semver",
+ "sha2",
  "zip",
 ]
 
@@ -20167,7 +20191,7 @@ dependencies = [
 
 [[package]]
 name = "zed"
-version = "0.197.0"
+version = "0.198.0"
 dependencies = [
  "activity_indicator",
  "agent",
@@ -20208,6 +20232,7 @@ dependencies = [
  "extension",
  "extension_host",
  "extensions_ui",
+ "feature_flags",
  "feedback",
  "file_finder",
  "fs",
