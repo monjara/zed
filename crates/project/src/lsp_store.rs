@@ -4911,7 +4911,7 @@ impl LspStore {
                 language_server_id: server_id.0 as u64,
                 hint: Some(InlayHints::project_to_proto_hint(hint.clone())),
             };
-            cx.spawn(async move |_, _| {
+            cx.background_spawn(async move {
                 let response = upstream_client
                     .request(request)
                     .await
@@ -5125,7 +5125,7 @@ impl LspStore {
                 trigger,
                 version: serialize_version(&buffer.read(cx).version()),
             };
-            cx.spawn(async move |_, _| {
+            cx.background_spawn(async move {
                 client
                     .request(request)
                     .await?
@@ -5284,7 +5284,7 @@ impl LspStore {
                 GetDefinitions { position },
                 cx,
             );
-            cx.spawn(async move |_, _| {
+            cx.background_spawn(async move {
                 Ok(definitions_task
                     .await
                     .into_iter()
@@ -5357,7 +5357,7 @@ impl LspStore {
                 GetDeclarations { position },
                 cx,
             );
-            cx.spawn(async move |_, _| {
+            cx.background_spawn(async move {
                 Ok(declarations_task
                     .await
                     .into_iter()
@@ -5430,7 +5430,7 @@ impl LspStore {
                 GetTypeDefinitions { position },
                 cx,
             );
-            cx.spawn(async move |_, _| {
+            cx.background_spawn(async move {
                 Ok(type_definitions_task
                     .await
                     .into_iter()
@@ -5503,7 +5503,7 @@ impl LspStore {
                 GetImplementations { position },
                 cx,
             );
-            cx.spawn(async move |_, _| {
+            cx.background_spawn(async move {
                 Ok(implementations_task
                     .await
                     .into_iter()
@@ -5576,7 +5576,7 @@ impl LspStore {
                 GetReferences { position },
                 cx,
             );
-            cx.spawn(async move |_, _| {
+            cx.background_spawn(async move {
                 Ok(references_task
                     .await
                     .into_iter()
@@ -5660,7 +5660,7 @@ impl LspStore {
                 },
                 cx,
             );
-            cx.spawn(async move |_, _| {
+            cx.background_spawn(async move {
                 Ok(all_actions_task
                     .await
                     .into_iter()
@@ -6044,7 +6044,6 @@ impl LspStore {
 
                         let resolved = Self::resolve_completion_local(
                             server,
-                            &buffer_snapshot,
                             completions.clone(),
                             completion_index,
                         )
@@ -6077,7 +6076,6 @@ impl LspStore {
 
     async fn resolve_completion_local(
         server: Arc<lsp::LanguageServer>,
-        snapshot: &BufferSnapshot,
         completions: Rc<RefCell<Box<[Completion]>>>,
         completion_index: usize,
     ) -> Result<()> {
@@ -6122,26 +6120,8 @@ impl LspStore {
             .into_response()
             .context("resolve completion")?;
 
-        if let Some(text_edit) = resolved_completion.text_edit.as_ref() {
-            // Technically we don't have to parse the whole `text_edit`, since the only
-            // language server we currently use that does update `text_edit` in `completionItem/resolve`
-            // is `typescript-language-server` and they only update `text_edit.new_text`.
-            // But we should not rely on that.
-            let edit = parse_completion_text_edit(text_edit, snapshot);
-
-            if let Some(mut parsed_edit) = edit {
-                LineEnding::normalize(&mut parsed_edit.new_text);
-
-                let mut completions = completions.borrow_mut();
-                let completion = &mut completions[completion_index];
-
-                completion.new_text = parsed_edit.new_text;
-                completion.replace_range = parsed_edit.replace_range;
-                if let CompletionSource::Lsp { insert_range, .. } = &mut completion.source {
-                    *insert_range = parsed_edit.insert_range;
-                }
-            }
-        }
+        // We must not use any data such as sortText, filterText, insertText and textEdit to edit `Completion` since they are not suppose change during resolve.
+        // Refer: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion
 
         let mut completions = completions.borrow_mut();
         let completion = &mut completions[completion_index];
@@ -6391,12 +6371,10 @@ impl LspStore {
             }) else {
                 return Task::ready(Ok(None));
             };
-            let snapshot = buffer_handle.read(&cx).snapshot();
 
             cx.spawn(async move |this, cx| {
                 Self::resolve_completion_local(
                     server.clone(),
-                    &snapshot,
                     completions.clone(),
                     completion_index,
                 )
@@ -6854,7 +6832,7 @@ impl LspStore {
         } else {
             let document_colors_task =
                 self.request_multiple_lsp_locally(buffer, None::<usize>, GetDocumentColor, cx);
-            cx.spawn(async move |_, _| {
+            cx.background_spawn(async move {
                 Ok(document_colors_task
                     .await
                     .into_iter()
@@ -6933,7 +6911,7 @@ impl LspStore {
                 GetSignatureHelp { position },
                 cx,
             );
-            cx.spawn(async move |_, _| {
+            cx.background_spawn(async move {
                 all_actions_task
                     .await
                     .into_iter()
@@ -7010,7 +6988,7 @@ impl LspStore {
                 GetHover { position },
                 cx,
             );
-            cx.spawn(async move |_, _| {
+            cx.background_spawn(async move {
                 all_actions_task
                     .await
                     .into_iter()
@@ -8013,7 +7991,7 @@ impl LspStore {
             })
             .collect::<FuturesUnordered<_>>();
 
-        cx.spawn(async move |_, _| {
+        cx.background_spawn(async move {
             let mut responses = Vec::with_capacity(response_results.len());
             while let Some((server_id, response_result)) = response_results.next().await {
                 if let Some(response) = response_result.log_err() {
