@@ -150,7 +150,6 @@ impl Settings for ProxySettings {
 
 pub fn init_settings(cx: &mut App) {
     TelemetrySettings::register(cx);
-    DisableAiSettings::register(cx);
     ClientSettings::register(cx);
     ProxySettings::register(cx);
 }
@@ -539,33 +538,6 @@ impl settings::Settings for TelemetrySettings {
     }
 }
 
-/// Whether to disable all AI features in Zed.
-///
-/// Default: false
-#[derive(Copy, Clone, Debug)]
-pub struct DisableAiSettings {
-    pub disable_ai: bool,
-}
-
-impl settings::Settings for DisableAiSettings {
-    const KEY: Option<&'static str> = Some("disable_ai");
-
-    type FileContent = Option<bool>;
-
-    fn load(sources: SettingsSources<Self::FileContent>, _: &mut App) -> Result<Self> {
-        Ok(Self {
-            disable_ai: sources
-                .user
-                .or(sources.server)
-                .copied()
-                .flatten()
-                .unwrap_or(sources.default.ok_or_else(Self::missing_default)?),
-        })
-    }
-
-    fn import_from_vscode(_vscode: &settings::VsCodeSettings, _current: &mut Self::FileContent) {}
-}
-
 impl Client {
     pub fn new(
         clock: Arc<dyn SystemClock>,
@@ -715,7 +687,10 @@ impl Client {
                             }
                         }
 
-                        if matches!(*client.status().borrow(), Status::ConnectionError) {
+                        if matches!(
+                            *client.status().borrow(),
+                            Status::AuthenticationError | Status::ConnectionError
+                        ) {
                             client.set_status(
                                 Status::ReconnectionError {
                                     next_reconnection: Instant::now() + delay,
@@ -884,27 +859,14 @@ impl Client {
 
         let old_credentials = self.state.read().credentials.clone();
         if let Some(old_credentials) = old_credentials {
-            self.cloud_client.set_credentials(
-                old_credentials.user_id as u32,
-                old_credentials.access_token.clone(),
-            );
-
-            // Fetch the authenticated user with the old credentials, to ensure they are still valid.
-            if self.cloud_client.get_authenticated_user().await.is_ok() {
+            if self.validate_credentials(&old_credentials, cx).await? {
                 credentials = Some(old_credentials);
             }
         }
 
         if credentials.is_none() && try_provider {
             if let Some(stored_credentials) = self.credentials_provider.read_credentials(cx).await {
-                self.cloud_client.set_credentials(
-                    stored_credentials.user_id as u32,
-                    stored_credentials.access_token.clone(),
-                );
-
-                // Fetch the authenticated user with the stored credentials, and
-                // clear them from the credentials provider if that fails.
-                if self.cloud_client.get_authenticated_user().await.is_ok() {
+                if self.validate_credentials(&stored_credentials, cx).await? {
                     credentials = Some(stored_credentials);
                 } else {
                     self.credentials_provider
@@ -951,6 +913,24 @@ impl Client {
         self.set_status(Status::Authenticated, cx);
 
         Ok(credentials)
+    }
+
+    async fn validate_credentials(
+        self: &Arc<Self>,
+        credentials: &Credentials,
+        cx: &AsyncApp,
+    ) -> Result<bool> {
+        match self
+            .cloud_client
+            .validate_credentials(credentials.user_id as u32, &credentials.access_token)
+            .await
+        {
+            Ok(valid) => Ok(valid),
+            Err(err) => {
+                self.set_status(Status::AuthenticationError, cx);
+                Err(anyhow!("failed to validate credentials: {}", err))
+            }
+        }
     }
 
     /// Performs a sign-in and also connects to Collab.
@@ -1709,7 +1689,7 @@ pub fn parse_zed_link<'a>(link: &'a str, cx: &App) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test::FakeServer;
+    use crate::test::{FakeServer, parse_authorization_header};
 
     use clock::FakeSystemClock;
     use gpui::{AppContext as _, BackgroundExecutor, TestAppContext};
@@ -1758,6 +1738,46 @@ mod tests {
         cx.executor().advance_clock(Duration::from_secs(10));
         while !matches!(status.next().await, Some(Status::Connected { .. })) {}
         assert_eq!(server.auth_count(), 2); // Client re-authenticated due to an invalid token
+    }
+
+    #[gpui::test(iterations = 10)]
+    async fn test_auth_failure_during_reconnection(cx: &mut TestAppContext) {
+        init_test(cx);
+        let http_client = FakeHttpClient::with_200_response();
+        let client =
+            cx.update(|cx| Client::new(Arc::new(FakeSystemClock::new()), http_client.clone(), cx));
+        let server = FakeServer::for_client(42, &client, cx).await;
+        let mut status = client.status();
+        assert!(matches!(
+            status.next().await,
+            Some(Status::Connected { .. })
+        ));
+        assert_eq!(server.auth_count(), 1);
+
+        // Simulate an auth failure during reconnection.
+        http_client
+            .as_fake()
+            .replace_handler(|_, _request| async move {
+                Ok(http_client::Response::builder()
+                    .status(503)
+                    .body("".into())
+                    .unwrap())
+            });
+        server.disconnect();
+        while !matches!(status.next().await, Some(Status::ReconnectionError { .. })) {}
+
+        // Restore the ability to authenticate.
+        http_client
+            .as_fake()
+            .replace_handler(|_, _request| async move {
+                Ok(http_client::Response::builder()
+                    .status(200)
+                    .body("".into())
+                    .unwrap())
+            });
+        cx.executor().advance_clock(Duration::from_secs(10));
+        while !matches!(status.next().await, Some(Status::Connected { .. })) {}
+        assert_eq!(server.auth_count(), 1); // Client reused the cached credentials when reconnecting
     }
 
     #[gpui::test(iterations = 10)]
@@ -1833,6 +1853,75 @@ mod tests {
             status.next().await,
             Some(Status::ReconnectionError { .. })
         ));
+    }
+
+    #[gpui::test(iterations = 10)]
+    async fn test_reauthenticate_only_if_unauthorized(cx: &mut TestAppContext) {
+        init_test(cx);
+        let auth_count = Arc::new(Mutex::new(0));
+        let http_client = FakeHttpClient::create(|_request| async move {
+            Ok(http_client::Response::builder()
+                .status(200)
+                .body("".into())
+                .unwrap())
+        });
+        let client =
+            cx.update(|cx| Client::new(Arc::new(FakeSystemClock::new()), http_client.clone(), cx));
+        client.override_authenticate({
+            let auth_count = auth_count.clone();
+            move |cx| {
+                let auth_count = auth_count.clone();
+                cx.background_spawn(async move {
+                    *auth_count.lock() += 1;
+                    Ok(Credentials {
+                        user_id: 1,
+                        access_token: auth_count.lock().to_string(),
+                    })
+                })
+            }
+        });
+
+        let credentials = client.sign_in(false, &cx.to_async()).await.unwrap();
+        assert_eq!(*auth_count.lock(), 1);
+        assert_eq!(credentials.access_token, "1");
+
+        // If credentials are still valid, signing in doesn't trigger authentication.
+        let credentials = client.sign_in(false, &cx.to_async()).await.unwrap();
+        assert_eq!(*auth_count.lock(), 1);
+        assert_eq!(credentials.access_token, "1");
+
+        // If the server is unavailable, signing in doesn't trigger authentication.
+        http_client
+            .as_fake()
+            .replace_handler(|_, _request| async move {
+                Ok(http_client::Response::builder()
+                    .status(503)
+                    .body("".into())
+                    .unwrap())
+            });
+        client.sign_in(false, &cx.to_async()).await.unwrap_err();
+        assert_eq!(*auth_count.lock(), 1);
+
+        // If credentials became invalid, signing in triggers authentication.
+        http_client
+            .as_fake()
+            .replace_handler(|_, request| async move {
+                let credentials = parse_authorization_header(&request).unwrap();
+                if credentials.access_token == "2" {
+                    Ok(http_client::Response::builder()
+                        .status(200)
+                        .body("".into())
+                        .unwrap())
+                } else {
+                    Ok(http_client::Response::builder()
+                        .status(401)
+                        .body("".into())
+                        .unwrap())
+                }
+            });
+        let credentials = client.sign_in(false, &cx.to_async()).await.unwrap();
+        assert_eq!(*auth_count.lock(), 2);
+        assert_eq!(credentials.access_token, "2");
     }
 
     #[gpui::test(iterations = 10)]
