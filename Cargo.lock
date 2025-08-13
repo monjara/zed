@@ -29,6 +29,7 @@ dependencies = [
  "tempfile",
  "terminal",
  "ui",
+ "url",
  "util",
  "workspace-hack",
 ]
@@ -196,6 +197,7 @@ dependencies = [
  "clock",
  "cloud_llm_client",
  "collections",
+ "context_server",
  "ctor",
  "editor",
  "env_logger 0.11.8",
@@ -229,6 +231,7 @@ dependencies = [
  "task",
  "tempfile",
  "terminal",
+ "text",
  "theme",
  "tree-sitter-rust",
  "ui",
@@ -11154,6 +11157,7 @@ dependencies = [
  "feature_flags",
  "fs",
  "fuzzy",
+ "git",
  "gpui",
  "itertools 0.14.0",
  "language",
@@ -11240,6 +11244,7 @@ dependencies = [
  "anyhow",
  "futures 0.3.31",
  "http_client",
+ "log",
  "schemars",
  "serde",
  "serde_json",
@@ -20684,7 +20689,7 @@ dependencies = [
 
 [[package]]
 name = "zed_emmet"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "zed_extension_api 0.1.0",
 ]
