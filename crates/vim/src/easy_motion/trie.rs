@@ -88,7 +88,7 @@ impl<T> Trie<T> {
         }
     }
 
-    pub fn iter(&self) -> TrieIterator<T> {
+    pub fn iter(&self) -> TrieIterator<'_, T> {
         TrieIterator::new(self)
     }
 }
