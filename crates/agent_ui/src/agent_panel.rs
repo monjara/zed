@@ -818,12 +818,10 @@ impl AgentPanel {
             ActiveView::Thread { thread, .. } => {
                 thread.update(cx, |thread, cx| thread.cancel_last_completion(window, cx));
             }
-            ActiveView::ExternalAgentThread { thread_view, .. } => {
-                thread_view.update(cx, |thread_element, cx| {
-                    thread_element.cancel_generation(cx)
-                });
-            }
-            ActiveView::TextThread { .. } | ActiveView::History | ActiveView::Configuration => {}
+            ActiveView::ExternalAgentThread { .. }
+            | ActiveView::TextThread { .. }
+            | ActiveView::History
+            | ActiveView::Configuration => {}
         }
     }
 
@@ -1259,13 +1257,11 @@ impl AgentPanel {
                                 ThemeSettings::get_global(cx).agent_font_size(cx) + delta;
                             let _ = settings
                                 .agent_font_size
-                                .insert(theme::clamp_font_size(agent_font_size).0);
+                                .insert(Some(theme::clamp_font_size(agent_font_size).into()));
                         },
                     );
                 } else {
-                    theme::adjust_agent_font_size(cx, |size| {
-                        *size += delta;
-                    });
+                    theme::adjust_agent_font_size(cx, |size| size + delta);
                 }
             }
             WhichFontSize::BufferFont => {

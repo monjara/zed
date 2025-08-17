@@ -15,6 +15,8 @@ mod toast_layer;
 mod toolbar;
 mod workspace_settings;
 
+pub use crate::notifications::NotificationFrame;
+pub use dock::Panel;
 pub use toast_layer::{ToastAction, ToastLayer, ToastView};
 
 use anyhow::{Context as _, Result, anyhow};
@@ -24,7 +26,6 @@ use client::{
     proto::{self, ErrorCode, PanelId, PeerId},
 };
 use collections::{HashMap, HashSet, hash_map};
-pub use dock::Panel;
 use dock::{Dock, DockPosition, PanelButtons, PanelHandle, RESIZE_HANDLE_SIZE};
 use futures::{
     Future, FutureExt, StreamExt,
@@ -2066,6 +2067,7 @@ impl Workspace {
     pub fn prompt_for_new_path(
         &mut self,
         lister: DirectoryLister,
+        suggested_name: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> oneshot::Receiver<Option<Vec<PathBuf>>> {
@@ -2093,7 +2095,7 @@ impl Workspace {
                     })
                     .or_else(std::env::home_dir)
                     .unwrap_or_else(|| PathBuf::from(""));
-                cx.prompt_for_new_path(&relative_to)
+                cx.prompt_for_new_path(&relative_to, suggested_name.as_deref())
             })?;
             let abs_path = match abs_path.await? {
                 Ok(path) => path,
@@ -6336,7 +6338,7 @@ impl Render for Workspace {
                                 .border_b_1()
                                 .border_color(colors.border)
                                 .child({
-                                    let this = cx.entity().clone();
+                                    let this = cx.entity();
                                     canvas(
                                         move |bounds, window, cx| {
                                             this.update(cx, |this, cx| {
