@@ -1,4 +1,3 @@
-use agent_client_protocol as acp;
 use anyhow::Result;
 use buffer_diff::{BufferDiff, BufferDiffSnapshot};
 use editor::{MultiBuffer, PathKey};
@@ -21,24 +20,15 @@ pub enum Diff {
 }
 
 impl Diff {
-    pub fn from_acp(
-        diff: acp::Diff,
+    pub fn finalized(
+        path: PathBuf,
+        old_text: Option<String>,
+        new_text: String,
         language_registry: Arc<LanguageRegistry>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let acp::Diff {
-            path,
-            old_text,
-            new_text,
-        } = diff;
-
         let multibuffer = cx.new(|_cx| MultiBuffer::without_headers(Capability::ReadOnly));
-
-        let new_buffer = cx.new(|cx| Buffer::local(new_text, cx));
-        let old_buffer = cx.new(|cx| Buffer::local(old_text.unwrap_or("".into()), cx));
-        let new_buffer_snapshot = new_buffer.read(cx).text_snapshot();
-        let buffer_diff = cx.new(|cx| BufferDiff::new(&new_buffer_snapshot, cx));
-
+        let buffer = cx.new(|cx| Buffer::local(new_text, cx));
         let task = cx.spawn({
             let multibuffer = multibuffer.clone();
             let path = path.clone();
@@ -48,42 +38,34 @@ impl Diff {
                     .await
                     .log_err();
 
-                new_buffer.update(cx, |buffer, cx| buffer.set_language(language.clone(), cx))?;
+                buffer.update(cx, |buffer, cx| buffer.set_language(language.clone(), cx))?;
 
-                let old_buffer_snapshot = old_buffer.update(cx, |buffer, cx| {
-                    buffer.set_language(language, cx);
-                    buffer.snapshot()
-                })?;
-
-                buffer_diff
-                    .update(cx, |diff, cx| {
-                        diff.set_base_text(
-                            old_buffer_snapshot,
-                            Some(language_registry),
-                            new_buffer_snapshot,
-                            cx,
-                        )
-                    })?
-                    .await?;
+                let diff = build_buffer_diff(
+                    old_text.unwrap_or("".into()).into(),
+                    &buffer,
+                    Some(language_registry.clone()),
+                    cx,
+                )
+                .await?;
 
                 multibuffer
                     .update(cx, |multibuffer, cx| {
                         let hunk_ranges = {
-                            let buffer = new_buffer.read(cx);
-                            let diff = buffer_diff.read(cx);
-                            diff.hunks_intersecting_range(Anchor::MIN..Anchor::MAX, &buffer, cx)
-                                .map(|diff_hunk| diff_hunk.buffer_range.to_point(&buffer))
+                            let buffer = buffer.read(cx);
+                            let diff = diff.read(cx);
+                            diff.hunks_intersecting_range(Anchor::MIN..Anchor::MAX, buffer, cx)
+                                .map(|diff_hunk| diff_hunk.buffer_range.to_point(buffer))
                                 .collect::<Vec<_>>()
                         };
 
                         multibuffer.set_excerpts_for_path(
-                            PathKey::for_buffer(&new_buffer, cx),
-                            new_buffer.clone(),
+                            PathKey::for_buffer(&buffer, cx),
+                            buffer.clone(),
                             hunk_ranges,
                             editor::DEFAULT_MULTIBUFFER_CONTEXT,
                             cx,
                         );
-                        multibuffer.add_diff(buffer_diff, cx);
+                        multibuffer.add_diff(diff, cx);
                     })
                     .log_err();
 
@@ -111,6 +93,15 @@ impl Diff {
                 text_snapshot,
                 cx,
             );
+            let snapshot = diff.snapshot(cx);
+
+            let secondary_diff = cx.new(|cx| {
+                let mut diff = BufferDiff::new(&buffer_snapshot, cx);
+                diff.set_snapshot(snapshot, &buffer_snapshot, cx);
+                diff
+            });
+            diff.set_secondary_diff(secondary_diff);
+
             diff
         });
 
@@ -209,7 +200,10 @@ impl PendingDiff {
             )
             .await?;
             buffer_diff.update(cx, |diff, cx| {
-                diff.set_snapshot(diff_snapshot, &text_snapshot, cx)
+                diff.set_snapshot(diff_snapshot.clone(), &text_snapshot, cx);
+                diff.secondary_diff().unwrap().update(cx, |diff, cx| {
+                    diff.set_snapshot(diff_snapshot.clone(), &text_snapshot, cx);
+                });
             })?;
             diff.update(cx, |diff, cx| {
                 if let Diff::Pending(diff) = diff {
@@ -227,7 +221,7 @@ impl PendingDiff {
     fn finalize(&self, cx: &mut Context<Diff>) -> FinalizedDiff {
         let ranges = self.excerpt_ranges(cx);
         let base_text = self.base_text.clone();
-        let language_registry = self.buffer.read(cx).language_registry().clone();
+        let language_registry = self.buffer.read(cx).language_registry();
 
         let path = self
             .buffer
@@ -253,7 +247,6 @@ impl PendingDiff {
 
         let buffer_diff = cx.spawn({
             let buffer = buffer.clone();
-            let language_registry = language_registry.clone();
             async move |_this, cx| {
                 build_buffer_diff(base_text, &buffer, language_registry, cx).await
             }
@@ -306,13 +299,13 @@ impl PendingDiff {
         let buffer = self.buffer.read(cx);
         let diff = self.diff.read(cx);
         let mut ranges = diff
-            .hunks_intersecting_range(Anchor::MIN..Anchor::MAX, &buffer, cx)
-            .map(|diff_hunk| diff_hunk.buffer_range.to_point(&buffer))
+            .hunks_intersecting_range(Anchor::MIN..Anchor::MAX, buffer, cx)
+            .map(|diff_hunk| diff_hunk.buffer_range.to_point(buffer))
             .collect::<Vec<_>>();
         ranges.extend(
             self.revealed_ranges
                 .iter()
-                .map(|range| range.to_point(&buffer)),
+                .map(|range| range.to_point(buffer)),
         );
         ranges.sort_unstable_by_key(|range| (range.start, Reverse(range.end)));
 

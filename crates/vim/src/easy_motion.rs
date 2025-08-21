@@ -64,7 +64,7 @@ impl EasyMotion {
         window: &mut Window,
         cx: &mut Context<Editor>,
     ) -> Entity<Self> {
-        let editor = cx.entity().clone();
+        let editor = cx.entity();
         cx.new(|cx| {
             cx.subscribe_in(&editor, window, Self::update_overlays)
                 .detach();
