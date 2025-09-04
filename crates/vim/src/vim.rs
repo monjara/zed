@@ -41,7 +41,9 @@ use object::Object;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_derive::Serialize;
-use settings::{Settings, SettingsSources, SettingsStore, SettingsUi, update_settings_file};
+use settings::{
+    Settings, SettingsKey, SettingsSources, SettingsStore, SettingsUi, update_settings_file,
+};
 use state::{Mode, Operator, RecordedSelection, SearchState, VimGlobals};
 use std::{mem, ops::Range, sync::Arc};
 use surrounds::SurroundsType;
@@ -249,7 +251,7 @@ pub fn init(cx: &mut App) {
             let fs = workspace.app_state().fs.clone();
             let currently_enabled = Vim::enabled(cx);
             update_settings_file::<VimModeSetting>(fs, cx, move |setting, _| {
-                *setting = Some(!currently_enabled)
+                setting.vim_mode = Some(!currently_enabled)
             })
         });
 
@@ -1811,7 +1813,8 @@ struct VimSettings {
     pub cursor_shape: CursorShapeSettings,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize, JsonSchema, SettingsUi)]
+#[derive(Clone, Default, Serialize, Deserialize, JsonSchema, SettingsUi, SettingsKey)]
+#[settings_key(key = "vim")]
 struct VimSettingsContent {
     pub default_mode: Option<ModeContent>,
     pub toggle_relative_line_numbers: Option<bool>,
@@ -1851,8 +1854,6 @@ impl From<ModeContent> for Mode {
 }
 
 impl Settings for VimSettings {
-    const KEY: Option<&'static str> = Some("vim");
-
     type FileContent = VimSettingsContent;
 
     fn load(sources: SettingsSources<Self::FileContent>, _: &mut App) -> Result<Self> {
