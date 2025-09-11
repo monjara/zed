@@ -187,7 +187,6 @@
       ".": "vim::Repeat",
 
       // easy_motion
-      ", s w": ["easy_motion::Word", "both"],
       ", s s": ["easy_motion::NChar", 1]
     }
   },

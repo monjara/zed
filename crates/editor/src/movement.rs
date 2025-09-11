@@ -2,12 +2,7 @@
 //! in editor given a given motion (e.g. it handles converting a "move left" command into coordinates in editor). It is exposed mostly for use by vim crate.
 
 use super::{Bias, DisplayPoint, DisplaySnapshot, SelectionGoal, ToDisplayPoint};
-use crate::{
-    DisplayRow, EditorStyle, ToOffset, ToPoint,
-    display_map::FoldPoint,
-    fold_map::{FoldOffset, FoldSnapshot},
-    scroll::ScrollAnchor,
-};
+use crate::{DisplayRow, EditorStyle, ToOffset, ToPoint, scroll::ScrollAnchor};
 use gpui::{Pixels, WindowTextSystem};
 use language::{CharClassifier, Point};
 use multi_buffer::{MultiBufferRow, MultiBufferSnapshot};
@@ -865,51 +860,6 @@ pub fn split_display_range_by_lines(
     result.push(start..range.end);
 
     result
-}
-
-pub fn find_boundary_range_fold(
-    map: &FoldSnapshot,
-    from: FoldPoint,
-    to: FoldPoint,
-    is_boundary: impl FnMut(char, char) -> bool,
-) -> Option<FoldPoint> {
-    find_boundary_point_in_range_fold(map, from, to, is_boundary, false)
-}
-
-fn find_boundary_point_in_range_fold(
-    map: &FoldSnapshot,
-    from: FoldPoint,
-    to: FoldPoint,
-    mut is_boundary: impl FnMut(char, char) -> bool,
-    return_point_before_boundary: bool,
-) -> Option<FoldPoint> {
-    let mut offset = from.to_offset(&map);
-    let to_offset = to.to_offset(&map);
-    let mut prev_offset = offset;
-
-    let mut iter = map.chars_for_range(offset, to_offset);
-    let mut prev_ch = iter.next()?;
-    offset += FoldOffset(1);
-    for ch in iter {
-        if is_boundary(prev_ch, ch) {
-            if return_point_before_boundary {
-                return Some(map.clip_point(prev_offset.to_point(map), Bias::Right));
-            } else {
-                return Some(map.clip_point(offset.to_point(map), Bias::Right));
-            }
-        }
-
-        prev_offset = offset;
-        // not really sure why this is necessary but this fixes the bug with a match
-        // appearing at the end of a folded block
-        offset += if ch == '⋯' {
-            FoldOffset(3)
-        } else {
-            FoldOffset(1)
-        };
-        prev_ch = ch;
-    }
-    None
 }
 
 #[cfg(test)]

@@ -26,7 +26,7 @@ pub(crate) fn bm_search(text: &str, pattern: &str, start_row: DisplayRow) -> Vec
         while s <= n - m {
             let mut j = (m - 1) as isize;
 
-            while j >= 0 && pattern[j as usize] == line_bytes[s + j as usize] {
+            while j >= 0 && pattern[j as usize].eq_ignore_ascii_case(&line_bytes[s + j as usize]) {
                 j -= 1;
             }
 

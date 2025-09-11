@@ -8,7 +8,7 @@ use gpui::{
     Window, actions,
 };
 use schemars::JsonSchema;
-use search::{enumerate_points_by_text, enumerate_word_beginnings, sort_matches_display};
+use search::{enumerate_points_by_text, sort_matches_display};
 use serde::Deserialize;
 use settings::Settings;
 use text::{Bias, SelectionGoal};
@@ -44,7 +44,6 @@ struct NChar(u8);
 actions!(easy_motion, [Cancel]);
 
 pub(crate) fn register(editor: &mut Editor, cx: &mut Context<EasyMotion>) {
-    EasyMotion::action(editor, cx, EasyMotion::word);
     EasyMotion::action(editor, cx, EasyMotion::n_char);
     EasyMotion::action(editor, cx, EasyMotion::cancel);
 }
@@ -215,38 +214,6 @@ impl EasyMotion {
 
         self.state = Some(new_state);
         self.pending_input = false;
-    }
-
-    fn word(&mut self, action: &Word, window: &mut Window, cx: &mut Context<Self>) {
-        let direction = action.0;
-        self.word_impl(direction, window, cx);
-    }
-
-    fn word_impl(&mut self, direction: Direction, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((vim, editor)) = self.vim.upgrade().zip(self.editor.upgrade()) else {
-            return;
-        };
-
-        let mode = vim.update(cx, |vim, cx| {
-            let mode = vim.mode;
-            assert_ne!(mode, Mode::EasyMotion);
-            vim.switch_mode(Mode::EasyMotion, false, window, cx);
-            mode
-        });
-
-        let new_state = editor.update(cx, |editor, cx| {
-            let points = enumerate_word_beginnings(direction, editor, window, cx);
-            Self::handle_new_matches(points, direction, editor, window, cx)
-        });
-
-        let Some(new_state) = new_state else {
-            vim.update(cx, move |vim, cx| {
-                vim.switch_mode(mode, false, window, cx);
-            });
-            return;
-        };
-
-        self.state = Some(new_state);
     }
 
     fn handle_new_matches(
