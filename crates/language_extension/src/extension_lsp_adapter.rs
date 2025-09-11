@@ -8,7 +8,6 @@ use anyhow::{Context as _, Result};
 use async_trait::async_trait;
 use collections::{HashMap, HashSet};
 use extension::{Extension, ExtensionLanguageServerProxy, WorktreeDelegate};
-use fs::Fs;
 use futures::{Future, FutureExt, future::join_all};
 use gpui::{App, AppContext, AsyncApp, Task};
 use language::{
@@ -125,6 +124,11 @@ impl ExtensionLanguageServerProxy for LanguageServerRegistryProxy {
         language_server_id: LanguageServerName,
         status: BinaryStatus,
     ) {
+        log::debug!(
+            "updating binary status for {} to {:?}",
+            language_server_id,
+            status
+        );
         self.language_registry
             .update_lsp_binary_status(language_server_id, status);
     }
@@ -264,7 +268,6 @@ impl LspAdapter for ExtensionLspAdapter {
 
     async fn initialization_options(
         self: Arc<Self>,
-        _: &dyn Fs,
         delegate: &Arc<dyn LspAdapterDelegate>,
     ) -> Result<Option<serde_json::Value>> {
         let delegate = Arc::new(WorktreeDelegateAdapter(delegate.clone())) as _;
@@ -287,7 +290,6 @@ impl LspAdapter for ExtensionLspAdapter {
 
     async fn workspace_configuration(
         self: Arc<Self>,
-        _: &dyn Fs,
         delegate: &Arc<dyn LspAdapterDelegate>,
         _: Option<Toolchain>,
         _cx: &mut AsyncApp,
@@ -309,7 +311,6 @@ impl LspAdapter for ExtensionLspAdapter {
     async fn additional_initialization_options(
         self: Arc<Self>,
         target_language_server_id: LanguageServerName,
-        _: &dyn Fs,
         delegate: &Arc<dyn LspAdapterDelegate>,
     ) -> Result<Option<serde_json::Value>> {
         let delegate = Arc::new(WorktreeDelegateAdapter(delegate.clone())) as _;
@@ -335,7 +336,7 @@ impl LspAdapter for ExtensionLspAdapter {
     async fn additional_workspace_configuration(
         self: Arc<Self>,
         target_language_server_id: LanguageServerName,
-        _: &dyn Fs,
+
         delegate: &Arc<dyn LspAdapterDelegate>,
 
         _cx: &mut AsyncApp,

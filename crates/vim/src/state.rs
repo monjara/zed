@@ -1196,10 +1196,7 @@ impl PickerDelegate for RegistersViewDelegate {
         _: &mut Window,
         cx: &mut Context<Picker<Self>>,
     ) -> Option<Self::ListItem> {
-        let register_match = self
-            .matches
-            .get(ix)
-            .expect("Invalid matches state: no element for index {ix}");
+        let register_match = self.matches.get(ix)?;
 
         let mut output = String::new();
         let mut runs = Vec::new();
@@ -1588,10 +1585,7 @@ impl PickerDelegate for MarksViewDelegate {
         _: &mut Window,
         cx: &mut Context<Picker<Self>>,
     ) -> Option<Self::ListItem> {
-        let mark_match = self
-            .matches
-            .get(ix)
-            .expect("Invalid matches state: no element for index {ix}");
+        let mark_match = self.matches.get(ix)?;
 
         let mut left_output = String::new();
         let mut left_runs = Vec::new();
