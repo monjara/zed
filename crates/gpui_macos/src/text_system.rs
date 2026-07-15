@@ -5,6 +5,7 @@ use core_foundation::{
     array::{CFArray, CFArrayRef},
     attributed_string::CFMutableAttributedString,
     base::{CFRange, CFType, TCFType},
+    boolean::CFBoolean,
     number::CFNumber,
     string::CFString,
 };
@@ -22,7 +23,7 @@ use core_text::{
         kCTFontWidthTrait,
     },
     line::CTLine,
-    string_attributes::kCTFontAttributeName,
+    string_attributes::{kCTFontAttributeName, kCTVerticalFormsAttributeName},
 };
 use font_kit::{
     font::Font as FontKitFont,
@@ -68,6 +69,7 @@ struct MacTextSystemState {
     system_source: SystemSource,
     fonts: Vec<FontKitFont>,
     font_selections: HashMap<Font, FontId>,
+    font_features_by_id: HashMap<FontId, FontFeatures>,
     font_ids_by_postscript_name: HashMap<String, FontId>,
     font_ids_by_font_key: HashMap<FontKey, SmallVec<[FontId; 4]>>,
     postscript_names_by_font_id: HashMap<FontId, String>,
@@ -81,6 +83,7 @@ impl MacTextSystem {
             system_source: SystemSource::new(),
             fonts: Vec::new(),
             font_selections: HashMap::default(),
+            font_features_by_id: HashMap::default(),
             font_ids_by_postscript_name: HashMap::default(),
             font_ids_by_font_key: HashMap::default(),
             postscript_names_by_font_id: HashMap::default(),
@@ -373,6 +376,9 @@ impl MacTextSystemState {
             }
             let font_id = FontId(self.fonts.len());
             font_ids.push(font_id);
+            let postscript_name = font.postscript_name().unwrap();
+            self.font_features_by_id
+                .insert(font_id, features.clone());
             self.font_ids_by_postscript_name
                 .insert(postscript_name.clone(), font_id);
             self.postscript_names_by_font_id
@@ -398,6 +404,9 @@ impl MacTextSystemState {
             *font_id
         } else {
             let font_id = FontId(self.fonts.len());
+            self.font_features_by_id
+                .entry(font_id)
+                .or_default();
             self.font_ids_by_postscript_name
                 .insert(postscript_name.clone(), font_id);
             self.postscript_names_by_font_id
@@ -567,6 +576,17 @@ impl MacTextSystemState {
                         kCTFontAttributeName,
                         &font.native_font().clone_with_font_size(font_size.into()),
                     );
+                    if self
+                        .font_features_by_id
+                        .get(&run.font_id)
+                        .is_some_and(has_vertical_forms_feature)
+                    {
+                        string.set_attribute(
+                            cf_range,
+                            kCTVerticalFormsAttributeName,
+                            &CFBoolean::true_value(),
+                        );
+                    }
                 }
                 break_ligature = !break_ligature;
             }
@@ -626,6 +646,13 @@ impl MacTextSystemState {
             len: text.len(),
         }
     }
+}
+
+fn has_vertical_forms_feature(features: &FontFeatures) -> bool {
+    features
+        .tag_value_list()
+        .iter()
+        .any(|(tag, value)| (tag == "vert" || tag == "vrt2") && *value != 0)
 }
 
 #[derive(Debug, Clone)]

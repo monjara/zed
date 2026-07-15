@@ -13,6 +13,29 @@ impl FontFeatures {
         Self(Arc::new(vec![("calt".into(), 0)]))
     }
 
+    /// Enables the standard vertical writing alternates.
+    pub fn vertical_alternates() -> Self {
+        Self::default().with_tag_value("vert", 1).with_tag_value("vrt2", 1)
+    }
+
+    /// Returns a copy with the given OpenType feature tag set to the given value.
+    pub fn with_tag_value(mut self, tag: impl Into<String>, value: u32) -> Self {
+        let tag = tag.into();
+        if !is_valid_feature_tag(&tag) {
+            log::error!("Incorrect font feature tag: {}", tag);
+            return self;
+        }
+
+        let mut feature_list = (*self.0).clone();
+        if let Some((_, current_value)) = feature_list.iter_mut().find(|(name, _)| *name == tag) {
+            *current_value = value;
+        } else {
+            feature_list.push((tag, value));
+        }
+        self.0 = Arc::new(feature_list);
+        self
+    }
+
     /// Get the tag name list of the font OpenType features
     /// only enabled or disabled features are returned
     pub fn tag_value_list(&self) -> &[(String, u32)] {
@@ -151,4 +174,26 @@ impl JsonSchema for FontFeatures {
 
 fn is_valid_feature_tag(tag: &str) -> bool {
     tag.len() == 4 && tag.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FontFeatures;
+
+    #[test]
+    fn vertical_alternates_enable_vert_and_vrt2() {
+        let features = FontFeatures::vertical_alternates();
+
+        assert!(features.tag_value_list().contains(&("vert".into(), 1)));
+        assert!(features.tag_value_list().contains(&("vrt2".into(), 1)));
+    }
+
+    #[test]
+    fn with_tag_value_overwrites_existing_value() {
+        let features = FontFeatures::default()
+            .with_tag_value("vert", 1)
+            .with_tag_value("vert", 2);
+
+        assert_eq!(features.tag_value_list(), [("vert".into(), 2)]);
+    }
 }
